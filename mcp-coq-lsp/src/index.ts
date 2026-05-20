@@ -624,7 +624,7 @@ async function main() {
         const parts: string[] = [];
         if (hnames) parts.push(`hyps: ${hnames}`);
         const oneline = (g.ty || '').replace(/\s+/g, ' ');
-        const short = oneline.length > 60 ? oneline.slice(0, 57) + '...' : oneline;
+        const short = oneline.length > 70 ? oneline.slice(0, 67) + '…' : oneline;
         if (short) parts.push(`⊢ ${short}`);
         return parts.join(' | ');
       }

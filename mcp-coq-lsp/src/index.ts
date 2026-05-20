@@ -568,9 +568,22 @@ async function main() {
     }
 
     function reply(summary: string, data: unknown) {
+      const d = data as Record<string, unknown>;
+      const detailParts: string[] = [];
+      if (d?.goals) {
+        const goalsWrapped = Array.isArray(d.goals) ? { goals: d.goals } : d.goals;
+        detailParts.push(formatGoals(goalsWrapped));
+      }
+      if (Array.isArray(d?.feedback)) detailParts.push(formatFeedback(d.feedback));
+      detailParts.push(formatSemi(data, 0));
+      const detail = detailParts.join('\n');
+      const goalsObj = d?.goals ? (Array.isArray(d.goals) ? { goals: d.goals } : d.goals) : null;
+      const extra = goalsObj ? compactGoalSummary(goalsObj) : '';
+      const compact = summary + (extra ? ' | ' + extra : '');
       return {
         content: [
-          { type: 'text' as const, text: summary + '\n' + formatSemi(data, 1) },
+          { type: 'text' as const, text: detail },
+          { type: 'text' as const, text: compact },
         ],
       };
     }
@@ -578,7 +591,8 @@ async function main() {
     function err(summary: string, detail?: string) {
       return {
         content: [
-          { type: 'text' as const, text: summary + '\n' + formatSemi({ error: summary, detail: detail ?? summary }, 1) },
+          { type: 'text' as const, text: detail ?? summary },
+          { type: 'text' as const, text: summary },
         ],
         isError: true,
       };
@@ -586,20 +600,35 @@ async function main() {
 
     function formatGoals(goals: any): string {
       const gl = goals?.goals || [];
-      const n = gl.length;
-      if (n === 0) {
+      if (gl.length === 0) {
         const prog = goals?.program?.length || 0;
         const msgs = (goals?.messages || []).filter((m: any) => m.level === 1).map((m: any) => m.text).join('; ');
         return 'no goals' + (prog ? ` (${prog} program items)` : '') + (msgs ? '\n  messages: ' + msgs : '');
       }
       return gl.map((g: any, i: number) => {
-        const idx = n > 1 ? `Goal ${i + 1}: ` : '';
+        const idx = gl.length > 1 ? `Goal ${i + 1}: ` : '';
         const hyps = (g.hyps || []).map((h: any) => {
           const name = h.names ? h.names.join(', ') : (h.name || '?');
           return `  ${name}: ${h.ty || h.type}`;
         }).join('\n');
-        return idx + '⊢ ' + g.ty + (hyps ? '\n' + hyps : '');
+        return (hyps ? hyps + '\n' : '') + idx + '⊢ ' + g.ty;
       }).join('\n\n');
+    }
+
+    function compactGoalSummary(goals: any): string {
+      const gl = goals?.goals || [];
+      if (gl.length === 0) return '';
+      if (gl.length === 1 && gl[0]) {
+        const g = gl[0];
+        const hnames = (g.hyps || []).map((h: any) => h.names ? h.names.join(',') : (h.name || '?')).join('; ');
+        const parts: string[] = [];
+        if (hnames) parts.push(`hyps: ${hnames}`);
+        const oneline = (g.ty || '').replace(/\s+/g, ' ');
+        const short = oneline.length > 120 ? oneline.slice(0, 117) + '...' : oneline;
+        if (short) parts.push(`⊢ ${short}`);
+        return parts.join(' | ');
+      }
+      return `${gl.length} goals`;
     }
 
     function formatFeedback(fb: Array<[number, string]>): string {
@@ -642,15 +671,11 @@ async function main() {
             })
           );
 
-          const goals = result.goals?.goals || [];
-          const ngoals = goals.length;
-          let summary: string;
           if (result.error) {
-            summary = `${fileLine(file, position.line)} — error: ${result.error}`;
-          } else {
-            summary = `${fileLine(file, position.line)} — ${ngoals} goal(s):\n${formatGoals(result.goals)}`;
+            return reply(`${fileLine(file, position.line)} — error: ${result.error}`, result);
           }
-          return reply(summary, result);
+          const ngoals = (result.goals?.goals || []).length;
+          return reply(`${fileLine(file, position.line)} — ${ngoals} goal(s)`, result);
         }
 
         case 'coq_proof_state': {
@@ -822,12 +847,8 @@ async function main() {
           }
 
           const ngls = goals?.goals?.goals?.length ?? 0;
-          let gt = '';
-          if (ngls === 1) {
-            gt = '\n' + (goals?.goals?.goals?.[0]?.ty || '');
-          }
           return reply(
-            `${fileLine(file, position.line)} — inserted "${tactic.trim()}" → ${ngls} goal(s)${gt}`,
+            `${fileLine(file, position.line)} — inserted "${tactic.trim()}" → ${ngls} goal(s)`,
             { applied: true, goals: goals?.goals, messages: goals?.messages || [], error: goals?.error || null }
           );
         }
@@ -1134,10 +1155,8 @@ async function main() {
 
           const finished = runResult.proof_finished ? ' (proof finished!)' : '';
           const nGoals = goalsResult.goals?.length || 0;
-          const fb = runResult.feedback?.length ? '\n' + formatFeedback(runResult.feedback) : '';
-          const gt = nGoals > 0 ? '\n' + formatGoals(goalsResult) : '';
           return reply(
-            `"${tactic}" at ${fileLine(file, position.line)} → ${nGoals} goal(s)${finished}${gt}${fb}`,
+            `"${tactic}" at ${fileLine(file, position.line)} → ${nGoals} goal(s)${finished}`,
             { state_id: runResult.st, proof_finished: runResult.proof_finished, goals: goalsResult, feedback: runResult.feedback }
           );
         }

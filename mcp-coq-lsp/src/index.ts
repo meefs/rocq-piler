@@ -540,10 +540,31 @@ async function main() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
+    function formatSemi(data: unknown, indent = 0): string {
+      const pad = '  '.repeat(indent);
+      if (data === null || data === undefined) return pad + 'null';
+      if (typeof data === 'string') return pad + data;
+      if (typeof data === 'number' || typeof data === 'boolean') return pad + String(data);
+      if (Array.isArray(data)) {
+        if (data.length === 0) return pad + '[]';
+        return data.map((v, i) => pad + `[${i}]:` + '\n' + formatSemi(v, indent + 1).replace(/^\s+/, '')).join('\n');
+      }
+      if (typeof data === 'object') {
+        const entries = Object.entries(data as Record<string, unknown>);
+        if (entries.length === 0) return pad + '{}';
+        return entries.map(([k, v]) => {
+          if (v === null || v === undefined) return pad + k + ': null';
+          if (typeof v === 'object') return pad + k + ':\n' + formatSemi(v, indent + 1);
+          return pad + `${k}: ${v}`;
+        }).join('\n');
+      }
+      return pad + String(data);
+    }
+
     function reply(summary: string, data: unknown) {
       return {
         content: [
-          { type: 'text' as const, text: summary + '\n' + JSON.stringify(data, null, 2) },
+          { type: 'text' as const, text: summary + '\n' + formatSemi(data, 1) },
         ],
       };
     }
@@ -551,7 +572,7 @@ async function main() {
     function err(summary: string, detail?: string) {
       return {
         content: [
-          { type: 'text' as const, text: summary + '\n' + JSON.stringify({ error: summary, detail: detail ?? summary }, null, 2) },
+          { type: 'text' as const, text: summary + '\n' + formatSemi({ error: summary, detail: detail ?? summary }, 1) },
         ],
         isError: true,
       };

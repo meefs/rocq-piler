@@ -579,7 +579,7 @@ async function main() {
       const detail = detailParts.join('\n');
       const goalsObj = d?.goals ? (Array.isArray(d.goals) ? { goals: d.goals } : d.goals) : null;
       const extra = goalsObj ? compactGoalSummary(goalsObj) : '';
-      const compact = summary + (extra ? ' | ' + extra : '');
+      const compact = extra || summary;
       return {
         content: [
           { type: 'text' as const, text: detail },
@@ -624,7 +624,7 @@ async function main() {
         const parts: string[] = [];
         if (hnames) parts.push(`hyps: ${hnames}`);
         const oneline = (g.ty || '').replace(/\s+/g, ' ');
-        const short = oneline.length > 120 ? oneline.slice(0, 117) + '...' : oneline;
+        const short = oneline.length > 60 ? oneline.slice(0, 57) + '...' : oneline;
         if (short) parts.push(`⊢ ${short}`);
         return parts.join(' | ');
       }

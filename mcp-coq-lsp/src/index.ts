@@ -602,7 +602,8 @@ async function main() {
           const name = h.names ? h.names.join(', ') : (h.name || '?');
           return `  ${name}: ${h.ty || h.type}`;
         }).join('\n');
-        return (hyps ? hyps + '\n' : '') + idx + '⊢ ' + g.ty;
+        const ty = (g.ty || '').replace(/\s+/g, ' ');
+        return (hyps ? hyps + '\n' : '') + idx + '⊢ ' + ty;
       }).join('\n\n');
     }
 

@@ -117,11 +117,7 @@ async function main() {
     try {
       const srcDir = resolvePath(root, 'coq');
       if (fs.existsSync(srcDir)) {
-        args.push('-R', `${srcDir},`);
-      }
-      const buildDir = resolvePath(root, '_build', 'default', 'coq');
-      if (fs.existsSync(buildDir)) {
-        args.push('-R', `${buildDir},`);
+        args.push('-R', `${srcDir},Imp`);
       }
     } catch {}
     return args;

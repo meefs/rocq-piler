@@ -119,6 +119,10 @@ async function main() {
       if (fs.existsSync(srcDir)) {
         args.push('-R', `${srcDir},`);
       }
+      const buildDir = resolvePath(root, '_build', 'default', 'coq');
+      if (fs.existsSync(buildDir)) {
+        args.push('-R', `${buildDir},`);
+      }
     } catch {}
     return args;
   }

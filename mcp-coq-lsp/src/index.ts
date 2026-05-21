@@ -136,6 +136,15 @@ async function main() {
   const fileHistory = new Map<string, string[]>();
   const MAX_HISTORY = 50;
 
+  // Current cursor position per file — used when tools omit explicit position
+  const filePositions = new Map<string, Position>();
+
+  function getCurrentPosition(file: string): Position {
+    const pos = filePositions.get(file);
+    if (pos) return pos;
+    throw new Error(`No current position set for ${file}. Call coq_focus first to set a position.`);
+  }
+
   function pushFileHistory(path: string, text: string) {
     if (!fileHistory.has(path)) fileHistory.set(path, []);
     const stack = fileHistory.get(path)!;
@@ -161,6 +170,7 @@ async function main() {
       docManager.clear();
       speculativeImports.clear();
       fileHistory.clear();
+      filePositions.clear();
 
       // Do NOT await the full restart — fire it and let the caller retry.
       // The MCP client has a tighter timeout than the LSP cold-start needs.
@@ -274,7 +284,7 @@ async function main() {
                 description: 'Goal position mode (default: Prev)',
               },
             },
-            required: ['file', 'position'],
+            required: ['file'],
           },
         },
         {
@@ -413,7 +423,7 @@ async function main() {
                 description: 'Query goals after inserting',
               },
             },
-            required: ['file', 'position', 'tactic'],
+            required: ['file', 'tactic'],
           },
         },
         {
@@ -492,7 +502,7 @@ async function main() {
           },
         },
         {
-          name: 'coq_try_tactic',
+           name: 'coq_try_tactic',
           description:
             'Single-call speculative tactic execution: get state, run tactic, and return updated goals.',
           inputSchema: {
@@ -510,7 +520,7 @@ async function main() {
               tactic: { type: 'string', description: 'Tactic to run speculatively' },
               compact: { type: 'boolean', description: 'Use compact hypothesis display' },
             },
-            required: ['file', 'position', 'tactic'],
+            required: ['file', 'tactic'],
           },
         },
         {
@@ -748,13 +758,15 @@ async function main() {
     try {
       switch (name) {
         case 'coq_open_goals': {
-          const { file, position, pp_format, compact, mode } = args as {
+          const { file, position: rawPos, pp_format, compact, mode } = args as {
             file: string;
-            position: Position;
+            position?: Position;
             pp_format?: string;
             compact?: boolean;
             mode?: string;
           };
+
+          const position = rawPos || getCurrentPosition(file);
 
           // Ensure document is open
           const doc = await ensureDocumentOpened(file);
@@ -824,6 +836,7 @@ async function main() {
             position: Position;
           };
 
+          filePositions.set(file, position);
           const doc = await ensureDocumentOpened(file);
 
           // Get proof tree
@@ -1019,12 +1032,13 @@ async function main() {
         }
 
         case 'coq_insert_tactic': {
-          const { file, position, tactic, follow_with_goals } = args as {
+          const rawPos = (args as any).position as Position | undefined;
+          const { file, tactic, follow_with_goals } = args as {
             file: string;
-            position: Position;
             tactic: string;
             follow_with_goals?: boolean;
           };
+          const position = rawPos || getCurrentPosition(file);
 
           // Insert tactic at position
           const insertText = tactic.endsWith('\n') ? tactic : `${tactic}\n`;
@@ -1062,6 +1076,9 @@ async function main() {
 
           await docManager.updateDocument(file, newText);
           await docManager.saveDocument(file);
+
+          // Update current position for chaining
+          filePositions.set(file, insertedUntil);
 
           let goals = null;
           if (follow_with_goals ?? true) {
@@ -1366,12 +1383,13 @@ async function main() {
         }
 
         case 'coq_try_tactic': {
-          const { file, position, tactic, compact } = args as {
+          const rawPos = (args as any).position as Position | undefined;
+          const { file, tactic, compact } = args as {
             file: string;
-            position: Position;
             tactic: string;
             compact?: boolean;
           };
+          const position = rawPos || getCurrentPosition(file);
 
           const doc = await ensureDocumentOpened(file);
           const uri = doc.uri;

@@ -132,6 +132,18 @@ async function main() {
   // Speculative imports per file URI — persisted across tool calls
   const speculativeImports = new Map<string, string[]>();
 
+  // File history per file path — used by coq_undo to restore previous versions
+  const fileHistory = new Map<string, string[]>();
+  const MAX_HISTORY = 50;
+
+  function pushFileHistory(path: string, text: string) {
+    if (!fileHistory.has(path)) fileHistory.set(path, []);
+    const stack = fileHistory.get(path)!;
+    stack.push(text);
+    if (stack.length > MAX_HISTORY) stack.shift();
+    fileHistory.set(path, stack);
+  }
+
   /**
    * Open a document, first detecting and switching to its project root if needed.
    * This allows files from different Coq projects to be opened without restarting
@@ -148,6 +160,7 @@ async function main() {
       activeWorkspaceRoot = projectRoot;
       docManager.clear();
       speculativeImports.clear();
+      fileHistory.clear();
 
       // Do NOT await the full restart — fire it and let the caller retry.
       // The MCP client has a tighter timeout than the LSP cold-start needs.
@@ -258,7 +271,7 @@ async function main() {
               mode: {
                 type: 'string',
                 enum: ['Prev', 'After'],
-                description: 'Goal position mode (default: After)',
+                description: 'Goal position mode (default: Prev)',
               },
             },
             required: ['file', 'position'],
@@ -379,7 +392,9 @@ async function main() {
         {
           name: 'coq_insert_tactic',
           description:
-            'High-level helper: insert a tactic and return updated goals',
+            'High-level helper: insert a tactic and return updated goals. ' +
+            'Returns inserted_until (start of next line for chaining inserts) and ' +
+            'next_tactic_position (end of last inserted line for coq_try_tactic chaining).',
           inputSchema: {
             type: 'object',
             properties: {
@@ -463,14 +478,14 @@ async function main() {
         {
           name: 'coq_undo',
           description:
-            'Remove the last N tactics from the file and re-sync with rocq-lsp.',
+            'Restore the file to before the last N edit operations (coq_insert_tactic or coq_apply_edit). Uses operation history, not span counting.',
           inputSchema: {
             type: 'object',
             properties: {
               file: { type: 'string' },
               n: {
                 type: 'number',
-                description: 'Number of tactics to undo (default: 1)',
+                description: 'Number of file versions to undo (default: 1)',
               },
             },
             required: ['file'],
@@ -583,6 +598,31 @@ async function main() {
             required: ['file', 'thing'],
           },
         },
+        {
+          name: 'coq_focus',
+          description:
+            'Get full proof tree: current goals, bullet stack depth/levels, ' +
+            'and the proof script up to the given position.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: {
+                type: 'string',
+                description: 'Path to a .v file',
+              },
+              position: {
+                type: 'object',
+                properties: {
+                  line: { type: 'number' },
+                  character: { type: 'number' },
+                },
+                required: ['line', 'character'],
+                description: 'Position in the file (0-based)',
+              },
+            },
+            required: ['file', 'position'],
+          },
+        },
       ],
     };
   });
@@ -666,7 +706,8 @@ async function main() {
         return 'no goals' + (prog ? ` (${prog} program items)` : '') + (msgs ? '\n  messages: ' + msgs : '');
       }
       return gl.map((g: any, i: number) => {
-        const idx = gl.length > 1 ? `Goal ${i + 1}: ` : '';
+        const total = gl.length;
+        const idx = `Goal [${i + 1} of ${total}]: `;
         const hyps = (g.hyps || []).map((h: any) => {
           const name = h.names ? h.names.join(', ') : (h.name || '?');
           return `  ${name}: ${h.ty || h.type}`;
@@ -728,7 +769,7 @@ async function main() {
               position,
               pp_format: pp_format || 'Str',
               compact: compact ?? true,
-              mode: mode || 'After',
+              mode: mode || 'Prev',
             })
           );
 
@@ -775,6 +816,106 @@ async function main() {
             `${fileLine(file, position.line)} — proof ${pname}, ${ngoals} goal(s)`,
             { proof: proofInfo, goals: goalsResult.goals, messages: goalsResult.messages, error: goalsResult.error }
           );
+        }
+
+        case 'coq_focus': {
+          const { file, position } = args as {
+            file: string;
+            position: Position;
+          };
+
+          const doc = await ensureDocumentOpened(file);
+
+          // Get proof tree
+          const goalsResult = await retryDocumentNotReady(() =>
+            lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+              textDocument: { uri: doc.uri, version: doc.version },
+              position,
+              pp_format: 'Str',
+              mode: 'Prev',
+            })
+          );
+
+          // Get document spans for proof script
+          let scriptLines: string[] = [];
+          try {
+            const docInfo = await lspClient.sendRequest<{
+              spans: Array<{ range: Range; ast?: unknown }>;
+            }>('coq/getDocument', {
+              textDocument: { uri: doc.uri, version: doc.version },
+              ast: false,
+            });
+            const fileLines = doc.text.split('\n');
+            // Find the span that contains the current position (the proof statement)
+            for (const span of docInfo.spans || []) {
+              const s = span.range.start;
+              const e = span.range.end;
+              if (s.line <= position.line && position.line <= e.line) {
+                scriptLines = fileLines.slice(s.line, position.line + 1);
+                break;
+              }
+            }
+          } catch {
+            // script extraction is best-effort
+          }
+
+          const gc = goalsResult.goals;
+          const goals = gc?.goals || [];
+          const stack = gc?.stack || [];
+          const bullet = gc?.bullet;
+          const shelf = gc?.shelf || [];
+          const givenUp = gc?.given_up || [];
+
+          // Format proof tree as text
+          const parts: string[] = [];
+          parts.push(`${fileLine(file, position.line)}`);
+
+          // Bullet level
+          if (bullet) parts.push(`  bullet: ${bullet}`);
+          parts.push(`  goals: ${goals.length} at focus`);
+
+          // Stack levels
+          if (stack.length > 0) {
+            parts.push(`  stack depth: ${stack.length}`);
+            for (let i = 0; i < stack.length; i++) {
+              const [before, after] = stack[i];
+              parts.push(`    level ${i + 1}: ${before.length} before, ${after.length} after`);
+            }
+          }
+
+          // Shelved / given-up
+          if (shelf.length > 0) parts.push(`  shelved: ${shelf.length}`);
+          if (givenUp.length > 0) parts.push(`  given-up: ${givenUp.length}`);
+
+          // Formatted goals
+          if (goals.length > 0) {
+            const goalText = formatGoals(gc);
+            parts.push('');
+            parts.push(goalText);
+          } else {
+            parts.push('  (no goals at focus)');
+          }
+
+          // Proof script
+          if (scriptLines.length > 0) {
+            parts.push('');
+            parts.push('-- proof script ----------');
+            scriptLines.forEach(l => parts.push(`  ${l}`));
+          }
+
+          return reply(parts.join('\n'), {
+            bullet,
+            goals_at_focus: goals.length,
+            stack_depth: stack.length,
+            stack: stack.map(([before, after]: any) => ({
+              before: before.length,
+              after: after.length,
+            })),
+            shelved: shelf.length,
+            given_up: givenUp.length,
+            script: scriptLines,
+            error: goalsResult.error || null,
+          });
         }
 
         case 'coq_get_state_at_pos': {
@@ -862,6 +1003,7 @@ async function main() {
           }
 
           // Apply edits
+          pushFileHistory(file, doc.text);
           const newText = docManager.applyEdits(doc.text, edits);
 
           // Update and save
@@ -887,18 +1029,27 @@ async function main() {
           // Insert tactic at position
           const insertText = tactic.endsWith('\n') ? tactic : `${tactic}\n`;
           const insertLines = insertText.split('\n');
-          // Number of actual content lines inserted (excluding trailing empty string)
-          const insertedLinesCount = insertLines.length - 1;
-          // Position at start of the line AFTER all inserted content (for chaining)
+          const contentLines = insertLines.slice(0, -1); // exclude trailing empty from \n
+          const lastIdx = contentLines.length - 1;
+          const insertedLinesCount = contentLines.length;
+          // Position at start of the line AFTER all inserted content (for chaining inserts)
           const insertedUntil: Position = {
             line: position.line + insertedLinesCount,
             character: 0,
+          };
+          // Position at end of last inserted content line (for coq_try_tactic chaining)
+          const nextTacticPosition: Position = {
+            line: position.line + lastIdx,
+            character: lastIdx === 0
+              ? (position.character || 0) + contentLines[0].length
+              : contentLines[lastIdx].length,
           };
 
           await ensureDocumentOpened(file);
 
           // Apply edit
           const doc = docManager.getDocument(file)!;
+          pushFileHistory(file, doc.text);
           const newText = docManager.applyEdits(doc.text, [
             {
               range: {
@@ -916,10 +1067,6 @@ async function main() {
           if (follow_with_goals ?? true) {
             const updatedDoc = docManager.getDocument(file)!;
             try {
-              const afterPosition: Position = {
-                line: insertedUntil.line,
-                character: 0,
-              };
               const goalsResult = await lspClient.sendRequest<
                 GoalAnswer<string>
               >('proof/goals', {
@@ -927,7 +1074,7 @@ async function main() {
                   uri: updatedDoc.uri,
                   version: updatedDoc.version,
                 },
-                position: afterPosition,
+                position: insertedUntil,
                 pp_format: 'Str',
                 mode: 'Prev',
               });
@@ -943,6 +1090,7 @@ async function main() {
             {
               applied: true,
               inserted_until: insertedUntil,
+              next_tactic_position: nextTacticPosition,
               goals: goals?.goals,
               messages: goals?.messages || [],
               error: goals?.error || null,
@@ -1195,55 +1343,25 @@ async function main() {
           };
 
           const count = n ?? 1;
+          const stack = fileHistory.get(file) || [];
 
-          const doc = await ensureDocumentOpened(file);
-
-          const result = await retryDocumentNotReady(() =>
-            lspClient.sendRequest<{
-              spans: Array<{ range: Range }>;
-              completed: { status: string; range: Range };
-            }>('coq/getDocument', {
-              textDocument: {
-                uri: doc.uri,
-                version: doc.version,
-              },
-              ast: false,
-            })
-          );
-
-          const spans = result.spans || [];
-          if (spans.length < count) {
-            throw new Error(
-              `Cannot undo ${count}: only ${spans.length} span(s) available`
-            );
+          if (stack.length === 0) {
+            throw new Error(`Nothing to undo for ${file}`);
+          }
+          if (stack.length < count) {
+            throw new Error(`Can only undo ${stack.length} operation(s), requested ${count}`);
           }
 
-          const sortedSpans = [...spans].sort((a, b) => {
-            if (a.range.start.line !== b.range.start.line) {
-              return a.range.start.line - b.range.start.line;
-            }
-            return a.range.start.character - b.range.start.character;
-          });
+          const restoreIdx = stack.length - count;
+          const restoreText = stack[restoreIdx];
+          fileHistory.set(file, stack.slice(0, restoreIdx));
 
-          const firstUndone = sortedSpans[sortedSpans.length - count];
-          const lastUndone = sortedSpans[sortedSpans.length - 1];
-
-          const newText = docManager.applyEdits(doc.text, [
-            {
-              range: {
-                start: firstUndone.range.start,
-                end: lastUndone.range.end,
-              },
-              newText: '',
-            },
-          ]);
-
-          await docManager.updateDocument(file, newText);
+          await docManager.updateDocument(file, restoreText);
           await docManager.saveDocument(file);
 
           return reply(
-            `${fileLine(file, 0)} — undone ${count} span(s), ${spans.length - count} remaining`,
-            { applied: true, removed_spans: count }
+            `${fileLine(file, 0)} — undone ${count} operation(s), ${restoreIdx} remaining in history`,
+            { applied: true, undone: count, remaining_history: restoreIdx }
           );
         }
 

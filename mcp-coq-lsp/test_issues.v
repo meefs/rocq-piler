@@ -1,9 +1,10 @@
 Require Import Arith.
 
-Lemma test_tree : forall (a b : nat), (a + b = b + a) /\ (a <= a + b).
+Lemma test_llm : forall (a b : nat), (a + b = b + a) /\ (a <= a + b).
 Proof.
-  intros a b.
-  split.
-  - apply Nat.add_comm.
-  (* second bullet missing *)
-Admitted.
+intros a b.
+split.
+- apply Nat.add_comm.
+- apply Nat.le_add_r.
+Qed.
+

@@ -44,6 +44,8 @@ The **Language Server Protocol** provides a standardized, machine-friendly inter
 
 This transforms the proof assistant into a **verification oracle** that an LLM can query interactively.
 
+In this implementation, the bridge is also **project-aware**: it can detect Coq/Rocq project roots, reopen documents under the correct workspace, and keep `rocq-lsp` aligned with `_CoqProject`, `_RocqProject`, or `dune-project` layouts.
+
 ### The Neurosymbolic Loop
 
 ```
@@ -181,7 +183,7 @@ This MCP (Model Context Protocol) server implements the LSP bridge:
               │ (tool calls)
 ┌─────────────▼────────────────────────┐
 │  mcp-coq-lsp                         │
-│  • Exposes 8 MCP tools               │
+│  • Exposes 14 MCP tools              │
 │  • Manages document state            │
 │  • Handles LSP ↔ MCP translation     │
 └─────────────┬────────────────────────┘
@@ -203,7 +205,7 @@ This MCP (Model Context Protocol) server implements the LSP bridge:
 └──────────────────────────────────────┘
 ```
 
-### 8 MCP Tools for Neurosymbolic Coq
+### 14 MCP Tools for Neurosymbolic Coq
 
 | Tool | Neural Use Case | Symbolic Capability |
 |------|----------------|---------------------|
@@ -214,7 +216,21 @@ This MCP (Model Context Protocol) server implements the LSP bridge:
 | `coq_goals_for_state` | "Show me goals after that tactic" | Returns goals for a state ID |
 | `coq_apply_edit` | "Update the proof file" | Applies text edits & re-verifies |
 | `coq_insert_tactic` | "Try this tactic and show results" | Insert + verify + return new goals |
+| `coq_search` | "What lemmas are relevant here?" | Runs speculative `Search` |
+| `coq_check_term` | "What type does this term have?" | Runs speculative `Check` |
+| `coq_about` | "What is this definition?" | Runs speculative `About` |
+| `coq_undo` | "Roll back the last proof steps" | Removes the last N tactics |
+| `coq_try_tactic` | "Try this tactic from the file state" | Single-call speculative tactic run |
 | `coq_check` | "Is the whole file valid?" | Forces full document checking |
+| `coq_check_range` | "What is wrong in this region?" | Returns diagnostics for a line range |
+
+### Current Server Behavior
+
+- **Dynamic workspace switching**: opening a file from another Coq project restarts `rocq-lsp` under the correct project root.
+- **Project-root detection**: walks upward looking for `_CoqProject`, `_RocqProject`, or `dune-project`.
+- **Readable goal output**: goal responses are formatted for MCP clients with hypotheses first and the goal rendered in a compact single-line form.
+- **Speculative proof search**: both low-level Petanque state APIs and higher-level single-call helpers are available.
+- **Lifecycle hardening**: the LSP client waits for readiness, guards overlapping restarts, and retries transient "Document is not ready" states.
 
 ## Benefits of This Approach
 
@@ -266,7 +282,7 @@ coq-lsp --version
 
 ### Installation
 ```bash
-cd mcp-coq-lsp
+cd mcp-coq-lsp/mcp-coq-lsp
 npm install
 npm run build
 ```
@@ -280,7 +296,7 @@ Add to your MCP settings:
     "coq-lsp": {
       "command": "node",
       "args": [
-        "/path/to/mcp-coq-lsp/dist/index.js",
+        "/path/to/mcp-coq-lsp/mcp-coq-lsp/dist/index.js",
         "--workspace-root",
         "/path/to/your/coq/project"
       ]
@@ -288,6 +304,8 @@ Add to your MCP settings:
   }
 }
 ```
+
+The server can start with one workspace root and later switch automatically when a tool call targets a file inside a different Coq project.
 
 Then in OpenCode:
 ```
@@ -327,9 +345,10 @@ As LLMs improve and proof assistants expose richer APIs, we expect:
 
 ## Learn More
 
-- **Specification**: See `mcp-coq-lsp/MCP_COQ_LSP_SPEC.md`
+- **Specification**: See `MCP_COQ_LSP_SPEC.md`
 - **Implementation**: See `mcp-coq-lsp/IMPLEMENTATION.md`
 - **Quick Start**: See `mcp-coq-lsp/QUICKSTART.md`
+- **Project config detection**: See `mcp-coq-lsp/PROJECT-CONFIG-DETECTION.md`
 - **Coq Documentation**: https://coq.inria.fr/
 - **coq-lsp Project**: https://github.com/ejgallego/coq-lsp
 

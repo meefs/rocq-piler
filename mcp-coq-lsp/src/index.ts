@@ -129,6 +129,9 @@ async function main() {
   // Track the active project root for dynamic workspace switching
   let activeWorkspaceRoot = workspaceRoot;
 
+  // Speculative imports per file URI — persisted across tool calls
+  const speculativeImports = new Map<string, string[]>();
+
   /**
    * Open a document, first detecting and switching to its project root if needed.
    * This allows files from different Coq projects to be opened without restarting
@@ -144,6 +147,7 @@ async function main() {
 
       activeWorkspaceRoot = projectRoot;
       docManager.clear();
+      speculativeImports.clear();
 
       // Do NOT await the full restart — fire it and let the caller retry.
       // The MCP client has a tighter timeout than the LSP cold-start needs.
@@ -162,7 +166,12 @@ async function main() {
     }
 
     try {
-      return await docManager.openDocument(path);
+      const doc = await docManager.openDocument(path);
+      const freshText = await fs.promises.readFile(absPath, 'utf-8');
+      if (freshText !== doc.text) {
+        return await docManager.updateDocument(path, freshText);
+      }
+      return doc;
     } catch (err: any) {
       if (err?.message === 'LSP client not started') {
         // LSP isn't running — try to start it
@@ -395,7 +404,9 @@ async function main() {
         {
           name: 'coq_search',
           description:
-            'Search for lemmas/theorems without polluting the source file. Runs `Search <pattern>.` speculatively and returns results.',
+            'Search the Coq environment for lemmas and theorems. Simple names auto-quote (e.g. "plus_n_O"). ' +
+            'Use parentheses for patterns: "(_ + 0 = _)" or just "_ + 0 = _". ' +
+            'Runs speculatively, no file changes.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -532,6 +543,46 @@ async function main() {
             required: ['file', 'range'],
           },
         },
+        {
+          name: 'coq_require',
+          description:
+            'Require a library speculatively. Runs `Require Import <lib>.` against the file environment. ' +
+            'Subsequent speculative queries on the same file will see the library. Does not modify the file.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: {
+                type: 'string',
+                description: 'Path to a .v file (provides the import environment)',
+              },
+              lib: {
+                type: 'string',
+                description: 'Library/module name to import (e.g. "Arith", "Coq.Lists.List")',
+              },
+            },
+            required: ['file', 'lib'],
+          },
+        },
+        {
+          name: 'coq_locate',
+          description:
+            'Find where a library, module, or term is defined. Runs `Locate <thing>.` speculatively. ' +
+            'Useful before Require to check if a module exists.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: {
+                type: 'string',
+                description: 'Path to a .v file (used to obtain a proof state)',
+              },
+              thing: {
+                type: 'string',
+                description: 'Name to locate (e.g. "Nat", "Coq.Lists.List", "plus_n_O")',
+              },
+            },
+            required: ['file', 'thing'],
+          },
+        },
       ],
     };
   });
@@ -589,6 +640,24 @@ async function main() {
       };
     }
 
+    /**
+     * Run all pending speculative imports for a document URI on a given state.
+     * Returns the final state after all imports.
+     */
+    async function runPendingImports(uri: string, stateId: number): Promise<number> {
+      const pending = speculativeImports.get(uri);
+      if (!pending || pending.length === 0) return stateId;
+      let st = stateId;
+      for (const lib of pending) {
+        const r = await lspClient.sendRequest<RunResult<number>>(
+          'petanque/run',
+          { st, tac: `Require Import ${lib}.`, opts: { memo: true, hash: true } }
+        );
+        st = r.st;
+      }
+      return st;
+    }
+
     function formatGoals(goals: any): string {
       const gl = goals?.goals || [];
       if (gl.length === 0) {
@@ -603,7 +672,7 @@ async function main() {
           return `  ${name}: ${h.ty || h.type}`;
         }).join('\n');
         const ty = (g.ty || '').replace(/\s+/g, ' ');
-        return (hyps ? hyps + '\n' : '') + idx + '⊢ ' + ty;
+        return (idx ? idx.trim() + '\n' : '') + (hyps ? hyps + '\n' : '') + '  ════════════════════════════════════\n  ' + ty;
       }).join('\n\n');
     }
 
@@ -736,6 +805,30 @@ async function main() {
           );
         }
 
+        case 'coq_run_tactic': {
+          const { state_id, tactic, memo, hash } = args as {
+            state_id: number;
+            tactic: string;
+            memo?: boolean;
+            hash?: boolean;
+          };
+
+          const result = await lspClient.sendRequest<RunResult<number>>(
+            'petanque/run',
+            {
+              st: state_id,
+              tac: tactic,
+              opts: { memo: memo ?? true, hash: hash ?? true },
+            }
+          );
+
+          const nFeedback = (result.feedback || []).length;
+          return reply(
+            `run state=${state_id} "${tactic}" → st=${result.st}, proof_finished=${!!result.proof_finished}, feedback=${nFeedback}`,
+            { state_id: result.st, proof_finished: result.proof_finished, feedback: result.feedback }
+          );
+        }
+
         case 'coq_goals_for_state': {
           const { state_id, compact } = args as {
             state_id: number;
@@ -793,6 +886,14 @@ async function main() {
 
           // Insert tactic at position
           const insertText = tactic.endsWith('\n') ? tactic : `${tactic}\n`;
+          const insertLines = insertText.split('\n');
+          // Number of actual content lines inserted (excluding trailing empty string)
+          const insertedLinesCount = insertLines.length - 1;
+          // Position at start of the line AFTER all inserted content (for chaining)
+          const insertedUntil: Position = {
+            line: position.line + insertedLinesCount,
+            character: 0,
+          };
 
           await ensureDocumentOpened(file);
 
@@ -815,12 +916,9 @@ async function main() {
           if (follow_with_goals ?? true) {
             const updatedDoc = docManager.getDocument(file)!;
             try {
-              const insertLines = insertText.split('\n');
-              let lastLineIdx = insertLines.length - 1;
-              if (insertLines[lastLineIdx] === '' && lastLineIdx > 0) lastLineIdx--;
               const afterPosition: Position = {
-                line: position.line + lastLineIdx,
-                character: insertLines[lastLineIdx].length,
+                line: insertedUntil.line,
+                character: 0,
               };
               const goalsResult = await lspClient.sendRequest<
                 GoalAnswer<string>
@@ -831,6 +929,7 @@ async function main() {
                 },
                 position: afterPosition,
                 pp_format: 'Str',
+                mode: 'Prev',
               });
               goals = goalsResult;
             } catch (err) {
@@ -841,7 +940,13 @@ async function main() {
           const ngls = goals?.goals?.goals?.length ?? 0;
           return reply(
             `${fileLine(file, position.line)} — inserted "${tactic.trim()}" → ${ngls} goal(s)`,
-            { applied: true, goals: goals?.goals, messages: goals?.messages || [], error: goals?.error || null }
+            {
+              applied: true,
+              inserted_until: insertedUntil,
+              goals: goals?.goals,
+              messages: goals?.messages || [],
+              error: goals?.error || null,
+            }
           );
         }
 
@@ -955,16 +1060,41 @@ async function main() {
             })
           );
 
-          const runResult = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
-            st: stateResult.st,
-            tac: `Search ${pattern}.`,
-            opts: { memo: false, hash: false },
-          });
+          // Run pending speculative imports, then the query
+          const searchSt = await runPendingImports(doc.uri, stateResult.st);
 
-          const msgs = runResult.feedback.map(([level, msg]) => ({ level, message: msg }));
+          // Pass pattern to Coq's Search command.
+          // Simple identifiers get quoted string search: Search "plus_n_O".
+          // Patterns like "_ + 0 = _" need to be wrapped in parens: Search (_ + 0 = _).
+          // Other forms like "leb" or "leb_le : ..." pass through as-is.
+          const searchText = (() => {
+            if (/^[a-zA-Z_][a-zA-Z0-9_']*$/.test(pattern))
+              return `Search "${pattern}".`;
+            if (/^_ [^:]+ _/.test(pattern) && !pattern.startsWith('('))
+              return `Search (${pattern}).`;
+            return `Search ${pattern}.`;
+          })();
+
+          let runResult: RunResult<number>;
+          let errorMsg: string | null = null;
+          try {
+            runResult = await lspClient.sendRequest<RunResult<number>>(
+              'petanque/run',
+              { st: searchSt, tac: searchText, opts: { memo: false, hash: false } }
+            );
+          } catch (e: any) {
+            // Try fallback: if the literal form failed and pattern has quotes, try without
+            errorMsg = e?.message || String(e);
+            runResult = { st: stateResult.st, proof_finished: false, feedback: [] };
+          }
+
+          const msgs = (runResult.feedback || []).map(([level, msg]: [number, string]) => ({ level, message: msg }));
+          const results = msgs.length > 0
+            ? msgs.map(m => m.message).join('\n')
+            : errorMsg || '(no results)';
           return reply(
-            `Search "${pattern}" → ${msgs.length} result(s)`,
-            { messages: msgs }
+            `Search "${pattern}" → ${msgs.length} result(s)\n${results}`,
+            { messages: msgs, error: errorMsg }
           );
         }
 
@@ -998,8 +1128,10 @@ async function main() {
             })
           );
 
+          const checkSt = await runPendingImports(doc3.uri, stateResult3.st);
+
           const runResult3 = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
-            st: stateResult3.st,
+            st: checkSt,
             tac: `Check ${term}.`,
             opts: { memo: false, hash: false },
           });
@@ -1041,8 +1173,10 @@ async function main() {
             })
           );
 
+          const aboutSt = await runPendingImports(doc4.uri, stateResult4.st);
+
           const runResult4 = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
-            st: stateResult4.st,
+            st: aboutSt,
             tac: `About ${term}.`,
             opts: { memo: false, hash: false },
           });
@@ -1122,34 +1256,158 @@ async function main() {
           };
 
           const doc = await ensureDocumentOpened(file);
+          const uri = doc.uri;
 
-          const stateResult = await retryDocumentNotReady(() =>
-            lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
-              uri: doc.uri,
-              position,
-              opts: { memo: true, hash: true },
-            })
-          );
+          async function getStateAt(pos: Position) {
+            return retryDocumentNotReady(() =>
+              lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                uri, position: pos, opts: { memo: true, hash: true },
+              })
+            );
+          }
 
-          const runResult = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
-            st: stateResult.st,
-            tac: tactic,
-            opts: { memo: true, hash: true },
-          });
+          async function tryRunTactic(st: number) {
+            const r = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+              st, tac: tactic, opts: { memo: true, hash: true },
+            });
+            const g = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+              st: r.st, opts: { compact: compact ?? true },
+            });
+            return { runResult: r, goalsResult: g };
+          }
 
-          const goalsResult = await lspClient.sendRequest<GoalConfig<string>>(
-            'petanque/goals',
-            {
-              st: runResult.st,
-              opts: { compact: compact ?? true },
+          // Try at user's position (Prev mode)
+          const stateResult = await getStateAt(position);
+          let result: { runResult: RunResult<number>; goalsResult: GoalConfig<string> };
+          try {
+            result = await tryRunTactic(stateResult.st);
+          } catch (e: any) {
+            if (e?.message?.includes('illegal begin of vernac')) {
+              // User position was outside proof mode (e.g. on Proof. line).
+              // Find the first span after position and retry from its state.
+              const docInfo = await retryDocumentNotReady(() =>
+                lspClient.sendRequest<{ spans: Array<{ range: Range }> }>('coq/getDocument', {
+                  textDocument: { uri, version: doc.version }, ast: false,
+                })
+              );
+              const spans = (docInfo.spans || []).filter(
+                s => s.range.start.line > position.line || (s.range.start.line === position.line && s.range.start.character > position.character)
+              ).sort((a, b) => a.range.start.line - b.range.start.line || a.range.start.character - b.range.start.character);
+              if (spans.length === 0) throw e;
+              const innerState = await getStateAt(spans[0].range.start);
+              result = await tryRunTactic(innerState.st);
+            } else {
+              throw e;
             }
-          );
+          }
 
+          const { runResult, goalsResult } = result;
           const finished = runResult.proof_finished ? ' (proof finished!)' : '';
           const nGoals = goalsResult.goals?.length || 0;
           return reply(
             `"${tactic}" at ${fileLine(file, position.line)} → ${nGoals} goal(s)${finished}`,
             { state_id: runResult.st, proof_finished: runResult.proof_finished, goals: goalsResult, feedback: runResult.feedback }
+          );
+        }
+
+        case 'coq_require': {
+          const { file, lib } = args as {
+            file: string;
+            lib: string;
+          };
+
+          const doc = await ensureDocumentOpened(file);
+
+          const docInfo = await retryDocumentNotReady(() =>
+            lspClient.sendRequest<{
+              spans: Array<{ range: Range }>;
+            }>('coq/getDocument', {
+              textDocument: { uri: doc.uri, version: doc.version },
+              ast: false,
+            })
+          );
+
+          const targetPos: Position =
+            (docInfo.spans && docInfo.spans.length > 0)
+              ? docInfo.spans[0].range.start
+              : { line: 0, character: 0 };
+
+          const stateResult = await retryDocumentNotReady(() =>
+            lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+              uri: doc.uri,
+              position: targetPos,
+              opts: { memo: true, hash: true },
+            })
+          );
+
+          const runResult = await lspClient.sendRequest<RunResult<number>>(
+            'petanque/run',
+            { st: stateResult.st, tac: `Require Import ${lib}.`, opts: { memo: false, hash: false } }
+          );
+
+          const msgs = (runResult.feedback || []).map(([level, msg]: [number, string]) => ({ level, message: msg }));
+          const ok = !msgs.some(m => m.level === 1);
+          if (ok) {
+            // Register persistent speculative import
+            const uri = docManager.pathToUri(file);
+            const existing = speculativeImports.get(uri) || [];
+            if (!existing.includes(lib)) {
+              existing.push(lib);
+              speculativeImports.set(uri, existing);
+            }
+          }
+          return reply(
+            ok
+              ? `Imported ${lib} — available for subsequent queries on ${file}`
+              : `Error importing ${lib}: ${msgs.map(m => m.message).join('; ')}`,
+            { ok, messages: msgs }
+          );
+        }
+
+        case 'coq_locate': {
+          const { file, thing } = args as {
+            file: string;
+            thing: string;
+          };
+
+          const doc = await ensureDocumentOpened(file);
+
+          const docInfo = await retryDocumentNotReady(() =>
+            lspClient.sendRequest<{
+              spans: Array<{ range: Range }>;
+            }>('coq/getDocument', {
+              textDocument: { uri: doc.uri, version: doc.version },
+              ast: false,
+            })
+          );
+
+          const targetPos: Position =
+            (docInfo.spans && docInfo.spans.length > 0)
+              ? docInfo.spans[0].range.start
+              : { line: 0, character: 0 };
+
+          const stateResult = await retryDocumentNotReady(() =>
+            lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+              uri: doc.uri,
+              position: targetPos,
+              opts: { memo: true, hash: true },
+            })
+          );
+
+          const locateSt = await runPendingImports(doc.uri, stateResult.st);
+
+          const runResult = await lspClient.sendRequest<RunResult<number>>(
+            'petanque/run',
+            { st: locateSt, tac: `Locate ${thing}.`, opts: { memo: false, hash: false } }
+          );
+
+          const msgs = (runResult.feedback || []).map(([level, msg]: [number, string]) => ({ level, message: msg }));
+          const results = msgs.length > 0
+            ? msgs.map(m => m.message).join('\n')
+            : '(not found)';
+          return reply(
+            `Locate "${thing}" → ${msgs.length} result(s)\n${results}`,
+            { messages: msgs }
           );
         }
 

@@ -1,10 +1,9 @@
 Require Import Arith.
 
-Lemma test_llm : forall (a b : nat), (a + b = b + a) /\ (a <= a + b).
+Lemma leb_total : forall n m, (n <=? m) = true \/ (m <=? n) = true.
 Proof.
-intros a b.
-split.
-- apply Nat.add_comm.
-- apply Nat.le_add_r.
+induction n as [| n' IHn]; intro m.
+- left. destruct m; reflexivity.
+- destruct m as [| m']; [right; reflexivity | simpl; destruct (IHn m') as [H | H]; [left; assumption | right; assumption]].
 Qed.
 

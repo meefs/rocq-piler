@@ -165,6 +165,11 @@ async function main() {
     return { line, character: 0 };
   }
 
+  function isProofEndLine(line: string): boolean {
+    const t = line.trim();
+    return t === 'Qed.' || t === 'Admitted.' || t === 'Defined.';
+  }
+
   function insertPosition(text: string, pos: Position): Position {
     const lines = text.split('\n');
     let line = pos.line;
@@ -174,10 +179,12 @@ async function main() {
       if (!isSkipLine(lines[line])) break;
       line = line + 1;
     }
-    // Skip past all non-blank content (existing tactics)
+    // Skip past non-blank content but stop at proof-ending keywords
     for (let i = 0; i < 200; i++) {
       if (line >= lines.length) break;
-      if ((lines[line] || '').trim() === '') break;
+      const l = (lines[line] || '').trim();
+      if (l === '') break;
+      if (isProofEndLine(lines[line] || '')) break;
       line = line + 1;
     }
     return { line, character: 0 };

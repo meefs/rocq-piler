@@ -691,6 +691,28 @@ async function main() {
             required: ['file', 'position'],
           },
         },
+        {
+          name: 'coq_reset_proof',
+          description:
+            'Wipe the proof body (from Proof. to Qed./Admitted.) and replace with fresh Admitted. ' +
+            'Use this to start over on a broken proof. Position defaults to current cursor.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', description: 'Path to a .v file' },
+              position: {
+                type: 'object',
+                properties: {
+                  line: { type: 'number' },
+                  character: { type: 'number' },
+                },
+                required: ['line', 'character'],
+                description: 'Position near the Proof. line (optional, uses cursor)',
+              },
+            },
+            required: ['file'],
+          },
+        },
       ],
     };
   });
@@ -1688,6 +1710,47 @@ async function main() {
           return reply(
             `Locate "${thing}" → ${msgs.length} result(s)\n${results}`,
             { messages: msgs }
+          );
+        }
+
+        case 'coq_reset_proof': {
+          const rawPos = (args as any).position as Position | undefined;
+          const { file } = args as { file: string };
+          const pos = (rawPos && rawPos.line !== undefined) ? rawPos : getCurrentPosition(file);
+
+          const doc = await ensureDocumentOpened(file);
+          const docLines = doc.text.split('\n');
+
+          let proofLine = pos.line;
+          while (proofLine >= 0) {
+            const l = (docLines[proofLine] || '').trim();
+            if (l === 'Proof.' || l.startsWith('Proof. ')) break;
+            proofLine--;
+          }
+          if (proofLine < 0) throw new Error('No Proof. found before position');
+
+          let endLine = proofLine + 1;
+          while (endLine < docLines.length) {
+            const l = (docLines[endLine] || '').trim();
+            if (l === 'Qed.' || l === 'Admitted.' || l === 'Defined.') break;
+            endLine++;
+          }
+
+          const newText = docManager.applyEdits(doc.text, [{
+            range: {
+              start: { line: proofLine + 1, character: 0 },
+              end: endLine < docLines.length ? { line: endLine + 1, character: 0 } : { line: endLine, character: (docLines[endLine - 1] || '').length },
+            },
+            newText: 'Admitted.\n',
+          }]);
+
+          await docManager.updateDocument(file, newText);
+          await docManager.saveDocument(file);
+          filePositions.set(file, { line: proofLine + 1, character: 0 });
+
+          return reply(
+            `${fileLine(file, proofLine)} — proof reset to Admitted.`,
+            { applied: true }
           );
         }
 

@@ -337,13 +337,18 @@ async function main() {
           description:
             'Get current open goals at a given position in a Coq/Rocq file. ' +
             'Uses Prev mode by default (shows state before the command at the position). ' +
-            'Position is optional — uses the cursor set by coq_focus if omitted.',
+            'Position is optional — uses the cursor set by coq_focus if omitted. ' +
+            'Prefer using "name" over explicit position.',
           inputSchema: {
             type: 'object',
             properties: {
               file: {
                 type: 'string',
                 description: 'Path to the .v file',
+              },
+              name: {
+                type: 'string',
+                description: 'Proof name (e.g. "preservation"). Finds Proof. line automatically.',
               },
               position: {
                 type: 'object',
@@ -493,12 +498,13 @@ async function main() {
             'Returns inserted_until (start of next line for chaining inserts) and ' +
             'next_tactic_position (end of last inserted line for coq_try_tactic chaining). ' +
             'Auto-prepends bullet prefix (-, +, *) when proof state requires it. ' +
-            'Position is optional — uses cursor from previous coq_focus or coq_insert_tactic. ' +
+            'Position is optional — uses "name" or cursor. ' +
             'Prefer explicit "as" clauses with induction/destruct for robust proofs.',
           inputSchema: {
             type: 'object',
             properties: {
               file: { type: 'string' },
+              name: { type: 'string', description: 'Proof name. Computes insert position from Proof. line.' },
               position: {
                 type: 'object',
                 properties: {
@@ -595,11 +601,12 @@ async function main() {
            name: 'coq_try_tactic',
           description:
             'Single-call speculative tactic execution: get state, run tactic, and return updated goals. ' +
-            'Position is optional — uses cursor if omitted. Does not modify the file.',
+            'Position is optional — uses "name" or cursor. Does not modify the file.',
           inputSchema: {
             type: 'object',
             properties: {
               file: { type: 'string' },
+              name: { type: 'string', description: 'Proof name. Computes position from Proof. line.' },
               position: {
                 type: 'object',
                 properties: {
@@ -903,15 +910,27 @@ async function main() {
     try {
       switch (name) {
         case 'coq_open_goals': {
-          const { file, position: rawPos, pp_format, compact, mode } = args as {
+          const { file, position: rawPos, name, pp_format, compact, mode } = args as {
             file: string;
             position?: Position;
+            name?: string;
             pp_format?: string;
             compact?: boolean;
             mode?: string;
           };
 
-          const position = (rawPos && rawPos.line !== undefined) ? rawPos : getCurrentPosition(file);
+          let position: Position;
+          if (rawPos && rawPos.line !== undefined) {
+            position = rawPos;
+          } else if (name) {
+            const doc = await ensureDocumentOpened(file);
+            const docLines = doc.text.split('\n');
+            const proofLine = findProofLine(docLines, name);
+            if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
+            position = autoAdvancePosition(doc.text, { line: proofLine, character: 0 });
+          } else {
+            position = getCurrentPosition(file);
+          }
 
           // Ensure document is open
           const doc = await ensureDocumentOpened(file);
@@ -1273,15 +1292,28 @@ async function main() {
 
         case 'coq_insert_tactic': {
           const rawPos = (args as any).position as Position | undefined;
-          const { file, tactic: rawTactic, follow_with_goals } = args as {
+          const { file, name, tactic: rawTactic, follow_with_goals } = args as {
             file: string;
+            name?: string;
             tactic: string;
             follow_with_goals?: boolean;
           };
-          const position = (rawPos && rawPos.line !== undefined) ? rawPos : getCurrentPosition(file);
 
           await ensureDocumentOpened(file);
           const doc = docManager.getDocument(file)!;
+
+          // Resolve position: explicit position > name > cursor
+          let position: Position;
+          if (rawPos && rawPos.line !== undefined) {
+            position = rawPos;
+          } else if (name) {
+            const docLines = doc.text.split('\n');
+            const proofLine = findProofLine(docLines, name);
+            if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
+            position = { line: proofLine, character: 0 };
+          } else {
+            position = getCurrentPosition(file);
+          }
 
           // Advance past Proof. and blank lines to the actual insert point
           const insPos = insertPosition(doc.text, position);
@@ -1747,12 +1779,25 @@ async function main() {
 
         case 'coq_try_tactic': {
           const rawPos = (args as any).position as Position | undefined;
-          const { file, tactic, compact } = args as {
+          const { file, name, tactic, compact } = args as {
             file: string;
+            name?: string;
             tactic: string;
             compact?: boolean;
           };
-          const position = (rawPos && rawPos.line !== undefined) ? rawPos : getCurrentPosition(file);
+
+          let position: Position;
+          if (rawPos && rawPos.line !== undefined) {
+            position = rawPos;
+          } else if (name) {
+            const doc = await ensureDocumentOpened(file);
+            const docLines = doc.text.split('\n');
+            const proofLine = findProofLine(docLines, name);
+            if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
+            position = autoAdvancePosition(doc.text, { line: proofLine, character: 0 });
+          } else {
+            position = getCurrentPosition(file);
+          }
 
           const doc = await ensureDocumentOpened(file);
           const uri = doc.uri;

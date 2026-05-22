@@ -1328,17 +1328,21 @@ async function main() {
             const range = result.completed?.range;
             const loc = range ? `L${range.start.line}-L${range.end.line}` : '?';
 
-            // Count Admitted. occurrences in the file
+            // Count Admitted. occurrences and locate them
             const docLines = doc.text.split('\n');
             let admittedCount = 0;
-            for (const line of docLines) {
-              if (line.trim() === 'Admitted.') admittedCount++;
+            const admittedAt: number[] = [];
+            for (let i = 0; i < docLines.length; i++) {
+              if (docLines[i].trim() === 'Admitted.') { admittedCount++; admittedAt.push(i); }
             }
 
+            const admittedInfo = admittedCount > 0
+              ? `, ${admittedCount} admitted (lines ${admittedAt.map(l => l + 1).join(', ')})`
+              : '';
+
             return reply(
-              `${fileLine(file, 0)} — ${result.completed?.status || 'unknown'}, ${spanCount} spans (${loc})` +
-                (admittedCount > 0 ? `, ${admittedCount} admitted` : ''),
-              { file, completed: result.completed?.status, span_count: spanCount, completed_range: loc, admitted: admittedCount, success: true }
+              `${fileLine(file, 0)} — ${result.completed?.status || 'unknown'}, ${spanCount} spans (${loc})` + admittedInfo,
+              { file, completed: result.completed?.status, span_count: spanCount, completed_range: loc, admitted: admittedCount, admitted_lines: admittedAt, success: true }
             );
           } catch (error) {
             return err(

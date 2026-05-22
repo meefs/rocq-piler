@@ -1231,8 +1231,16 @@ async function main() {
             const bullet = bulletMatch ? bulletMatch[0] : (rawBullet === '-' || rawBullet === '+' || rawBullet === '*' ? rawBullet : undefined);
             const firstWord = tactic.split(/\s+/)[0];
             const hasBullet = /^[-+*]+$/.test(firstWord) || firstWord === '{';
+
+            // Compute indent from stack depth (only for line-start insertions)
+            const atLineStart = position.character === 0;
+            const stackDepth = (stateResult.goals?.stack || []).length;
+            const indent = atLineStart ? '  '.repeat(stackDepth + 1) : '';
+
             if (bullet && !hasBullet && tactic !== 'Qed.' && tactic !== 'Defined.' && tactic !== 'Admitted.') {
-              tactic = `${bullet} ${tactic}`;
+              tactic = `${indent}${bullet} ${tactic}`;
+            } else if (atLineStart) {
+              tactic = `${indent}${tactic}`;
             }
           } catch {
             // state query is best-effort for bullets

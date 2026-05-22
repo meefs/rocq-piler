@@ -136,15 +136,6 @@ async function main() {
   const fileHistory = new Map<string, string[]>();
   const MAX_HISTORY = 50;
 
-  // Current cursor position per file — used when tools omit explicit position
-  const filePositions = new Map<string, Position>();
-
-  function getCurrentPosition(file: string): Position {
-    const pos = filePositions.get(file);
-    if (pos) return pos;
-    throw new Error(`No current position set for ${file}. Call coq_focus first to set a position.`);
-  }
-
   function isSkipLine(line: string): boolean {
     const trimmed = line.trim();
     if (trimmed === '') return true;
@@ -253,7 +244,6 @@ async function main() {
       docManager.clear();
       speculativeImports.clear();
       fileHistory.clear();
-      filePositions.clear();
 
       // Do NOT await the full restart — fire it and let the caller retry.
       // The MCP client has a tighter timeout than the LSP cold-start needs.
@@ -335,46 +325,18 @@ async function main() {
         {
           name: 'coq_open_goals',
           description:
-            'Get current open goals at a given position in a Coq/Rocq file. ' +
-            'Uses Prev mode by default (shows state before the command at the position). ' +
-            'Position is optional — uses the cursor set by coq_focus if omitted. ' +
-            'Prefer using "name" over explicit position.',
+            'Get current open goals for a proof in a Coq/Rocq file. ' +
+            'Uses Prev mode by default. Takes a proof name.',
           inputSchema: {
             type: 'object',
             properties: {
-              file: {
-                type: 'string',
-                description: 'Path to the .v file',
-              },
-              name: {
-                type: 'string',
-                description: 'Proof name (e.g. "preservation"). Finds Proof. line automatically.',
-              },
-              position: {
-                type: 'object',
-                properties: {
-                  line: { type: 'number' },
-                  character: { type: 'number' },
-                },
-                required: ['line', 'character'],
-                description: 'Position in the file (0-based)',
-              },
-              pp_format: {
-                type: 'string',
-                enum: ['Str', 'Pp'],
-                description: 'Pretty-printing format (default: Str)',
-              },
-              compact: {
-                type: 'boolean',
-                description: 'Use compact hypothesis display',
-              },
-              mode: {
-                type: 'string',
-                enum: ['Prev', 'After'],
-                description: 'Goal position mode (default: Prev)',
-              },
+              file: { type: 'string', description: 'Path to the .v file' },
+              name: { type: 'string', description: 'Proof name (e.g. "preservation")' },
+              pp_format: { type: 'string', enum: ['Str', 'Pp'], description: 'Pretty-printing format (default: Str)' },
+              compact: { type: 'boolean', description: 'Use compact hypothesis display' },
+              mode: { type: 'string', enum: ['Prev', 'After'], description: 'Goal position mode (default: Prev)' },
             },
-            required: ['file'],
+            required: ['file', 'name'],
           },
         },
         {
@@ -494,32 +456,21 @@ async function main() {
         {
           name: 'coq_insert_tactic',
           description:
-            'High-level helper: insert a tactic and return updated goals. ' +
-            'Returns inserted_until (start of next line for chaining inserts) and ' +
-            'next_tactic_position (end of last inserted line for coq_try_tactic chaining). ' +
+            'Insert a tactic into a proof and return updated goals. ' +
             'Auto-prepends bullet prefix (-, +, *) when proof state requires it. ' +
-            'Position is optional — uses "name" or cursor. ' +
             'Prefer explicit "as" clauses with induction/destruct for robust proofs.',
           inputSchema: {
             type: 'object',
             properties: {
               file: { type: 'string' },
-              name: { type: 'string', description: 'Proof name. Computes insert position from Proof. line.' },
-              position: {
-                type: 'object',
-                properties: {
-                  line: { type: 'number' },
-                  character: { type: 'number' },
-                },
-                required: ['line', 'character'],
-              },
+              name: { type: 'string', description: 'Proof name (e.g. "preservation")' },
               tactic: { type: 'string' },
               follow_with_goals: {
                 type: 'boolean',
                 description: 'Query goals after inserting',
               },
             },
-            required: ['file', 'tactic'],
+            required: ['file', 'name', 'tactic'],
           },
         },
         {
@@ -606,19 +557,11 @@ async function main() {
             type: 'object',
             properties: {
               file: { type: 'string' },
-              name: { type: 'string', description: 'Proof name. Computes position from Proof. line.' },
-              position: {
-                type: 'object',
-                properties: {
-                  line: { type: 'number' },
-                  character: { type: 'number' },
-                },
-                required: ['line', 'character'],
-              },
+              name: { type: 'string', description: 'Proof name' },
               tactic: { type: 'string', description: 'Tactic to run speculatively' },
               compact: { type: 'boolean', description: 'Use compact hypothesis display' },
             },
-            required: ['file', 'tactic'],
+            required: ['file', 'name', 'tactic'],
           },
         },
         {
@@ -910,26 +853,23 @@ async function main() {
     try {
       switch (name) {
         case 'coq_open_goals': {
-          const { file, position: rawPos, name, pp_format, compact, mode } = args as {
+          const { file, name, pp_format, compact, mode } = args as {
             file: string;
-            position?: Position;
-            name?: string;
+            name: string;
             pp_format?: string;
             compact?: boolean;
             mode?: string;
           };
 
           let position: Position;
-          if (rawPos && rawPos.line !== undefined) {
-            position = rawPos;
-          } else if (name) {
+          if (name) {
             const doc = await ensureDocumentOpened(file);
             const docLines = doc.text.split('\n');
             const proofLine = findProofLine(docLines, name);
             if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
             position = autoAdvancePosition(doc.text, { line: proofLine, character: 0 });
           } else {
-            position = getCurrentPosition(file);
+            throw new Error('name is required for coq_open_goals');
           }
 
           // Ensure document is open
@@ -995,26 +935,17 @@ async function main() {
         }
 
         case 'coq_focus': {
-          const { file, position: rawPos, name } = args as {
+          const { file, name } = args as {
             file: string;
-            position?: Position;
-            name?: string;
+            name: string;
           };
 
           const doc = await ensureDocumentOpened(file);
           const docLines = doc.text.split('\n');
 
-          // Resolve position: by name or explicit
-          let position: Position;
-          if (name) {
-            const pLine = findProofLine(docLines, name);
-            if (pLine < 0) throw new Error(`Proof not found: "${name}"`);
-            position = { line: pLine, character: 0 };
-          } else if (rawPos && rawPos.line !== undefined) {
-            position = rawPos;
-          } else {
-            position = getCurrentPosition(file);
-          }
+          const pLine = findProofLine(docLines, name);
+          if (pLine < 0) throw new Error(`Proof not found: "${name}"`);
+          const position = { line: pLine, character: 0 };
 
           // Auto-remove Admitted if proof body is empty (no tactics between Proof and Admitted)
           let didAutoRemove = false;
@@ -1031,7 +962,6 @@ async function main() {
               }]);
               await docManager.updateDocument(file, cleared);
               await docManager.saveDocument(file);
-              filePositions.set(file, { line: insPos.line, character: 0 });
               didAutoRemove = true;
             }
           }
@@ -1047,7 +977,6 @@ async function main() {
                 }]);
                 await docManager.updateDocument(file, cleared);
                 await docManager.saveDocument(file);
-                filePositions.set(file, { line: i, character: 0 });
                 didAutoRemove = true;
                 break;
               }
@@ -1056,9 +985,6 @@ async function main() {
           }
           // Refresh document state after any auto-remove edit
           const freshDoc = didAutoRemove ? docManager.getDocument(file)! : doc;
-          const freshLines = freshDoc.text.split('\n');
-          const viewPos = autoAdvancePosition(freshDoc.text, position);
-          if (!filePositions.has(file)) filePositions.set(file, insPos);
 
           // Get proof tree — use Prev mode (shows goals even with Admitted present)
           const goalsResult = await retryDocumentNotReady(() =>
@@ -1294,7 +1220,7 @@ async function main() {
           const rawPos = (args as any).position as Position | undefined;
           const { file, name, tactic: rawTactic, follow_with_goals } = args as {
             file: string;
-            name?: string;
+            name: string;
             tactic: string;
             follow_with_goals?: boolean;
           };
@@ -1302,18 +1228,11 @@ async function main() {
           await ensureDocumentOpened(file);
           const doc = docManager.getDocument(file)!;
 
-          // Resolve position: explicit position > name > cursor
-          let position: Position;
-          if (rawPos && rawPos.line !== undefined) {
-            position = rawPos;
-          } else if (name) {
-            const docLines = doc.text.split('\n');
-            const proofLine = findProofLine(docLines, name);
-            if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
-            position = { line: proofLine, character: 0 };
-          } else {
-            position = getCurrentPosition(file);
-          }
+          // Resolve position from name
+          const docLines = doc.text.split('\n');
+          const proofLine = findProofLine(docLines, name);
+          if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
+          const position = { line: proofLine, character: 0 };
 
           // Advance past Proof. and blank lines to the actual insert point
           const insPos = insertPosition(doc.text, position);
@@ -1374,7 +1293,6 @@ async function main() {
           pushFileHistory(file, doc.text);
 
           // If inserting Qed at a proof-ending keyword line, replace it
-          const docLines = doc.text.split('\n');
           const curLine = (docLines[insPos.line] || '').trim();
           const editEnd: Position = (tactic === 'Qed.' && (curLine === 'Admitted.' || curLine === 'Qed.' || curLine === 'Defined.'))
             ? { line: insPos.line, character: (docLines[insPos.line] || '').length }
@@ -1392,9 +1310,6 @@ async function main() {
 
           await docManager.updateDocument(file, newText);
           await docManager.saveDocument(file);
-
-          // Update current position for chaining
-          filePositions.set(file, insertedUntil);
 
           let goals = null;
           if (follow_with_goals ?? true) {
@@ -1778,28 +1693,18 @@ async function main() {
         }
 
         case 'coq_try_tactic': {
-          const rawPos = (args as any).position as Position | undefined;
           const { file, name, tactic, compact } = args as {
             file: string;
-            name?: string;
+            name: string;
             tactic: string;
             compact?: boolean;
           };
 
-          let position: Position;
-          if (rawPos && rawPos.line !== undefined) {
-            position = rawPos;
-          } else if (name) {
-            const doc = await ensureDocumentOpened(file);
-            const docLines = doc.text.split('\n');
-            const proofLine = findProofLine(docLines, name);
-            if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
-            position = autoAdvancePosition(doc.text, { line: proofLine, character: 0 });
-          } else {
-            position = getCurrentPosition(file);
-          }
-
           const doc = await ensureDocumentOpened(file);
+          const docLines = doc.text.split('\n');
+          const proofLine = findProofLine(docLines, name);
+          if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
+          const position = autoAdvancePosition(doc.text, { line: proofLine, character: 0 });
           const uri = doc.uri;
 
           async function getStateAt(pos: Position) {
@@ -1848,8 +1753,15 @@ async function main() {
           const { runResult, goalsResult } = result;
           const finished = runResult.proof_finished ? ' (proof finished!)' : '';
           const nGoals = goalsResult.goals?.length || 0;
+
+          // Format goals for display
+          let goalText = '';
+          if (goalsResult.goals && goalsResult.goals.length > 0) {
+            goalText = '\n' + formatGoals(goalsResult);
+          }
+
           return reply(
-            `"${tactic}" at ${fileLine(file, position.line)} → ${nGoals} goal(s)${finished}`,
+            `"${tactic}" at ${fileLine(file, position.line)} → ${nGoals} goal(s)${finished}${goalText}`,
             { state_id: runResult.st, proof_finished: runResult.proof_finished, goals: goalsResult, feedback: runResult.feedback }
           );
         }
@@ -1991,7 +1903,6 @@ async function main() {
 
           await docManager.updateDocument(file, newText);
           await docManager.saveDocument(file);
-          filePositions.set(file, { line: proofLine + 1, character: 0 });
 
           // Find the proof name
           let nameLine = proofLine - 1;
@@ -2021,12 +1932,32 @@ async function main() {
 
           const doc = await ensureDocumentOpened(file);
           const docLines = doc.text.split('\n');
-          let targetLine: number;
 
+          // Check if lemma already exists
+          for (let i = 0; i < docLines.length; i++) {
+            const l = docLines[i].trim();
+            const kw = l.split(/\s+/)[0];
+            if ((kw === 'Lemma' || kw === 'Theorem' || kw === 'Corollary' || kw === 'Example') &&
+                l.includes(name + ' :') && (l.includes(name + ' :') || l.includes(name + ':'))) {
+              const existingStmt = l.split(':').slice(1).join(':').trim().replace(/\.$/, '');
+              if (existingStmt === statement.trim()) {
+                return reply(
+                  `${fileLine(file, i)} — Lemma ${name} already exists with same statement (no-op)`,
+                  { exists: true, identical: true, line: i, proof: name, statement: existingStmt }
+                );
+              }
+              return reply(
+                `${fileLine(file, i)} — Lemma ${name} already exists with different statement`,
+                { exists: true, identical: false, line: i, proof: name, existing_statement: existingStmt, requested_statement: statement }
+              );
+            }
+          }
+
+          // Resolve insertion line via before parameter
+          let targetLine: number;
           if (before) {
             const pLine = findProofLine(docLines, before);
             if (pLine < 0) throw new Error(`"${before}" not found`);
-            // Find the toplevel statement line above this Proof.
             for (let i = pLine - 1; i >= 0; i--) {
               const kw = (docLines[i] || '').trim().split(/\s+/)[0];
               if (kw === 'Lemma' || kw === 'Theorem' || kw === 'Corollary' ||
@@ -2038,24 +1969,7 @@ async function main() {
             }
             targetLine = targetLine!;
           } else {
-            // Use cursor-based search
-            try {
-              const cur = getCurrentPosition(file);
-              targetLine = 0;
-              for (let i = cur.line; i >= 0; i--) {
-                const l = (docLines[i] || '').trim();
-                const kw = l.split(/\s+/)[0];
-                if (kw === 'Lemma' || kw === 'Theorem' || kw === 'Corollary' ||
-                    kw === 'Definition' || kw === 'Fixpoint' || kw === 'Inductive' ||
-                    kw === 'Example' || kw === 'Remark' || kw === 'Fact' ||
-                    kw === 'Axiom' || kw === 'CoInductive') {
-                  targetLine = i;
-                  break;
-                }
-              }
-            } catch {
-              targetLine = docLines.length;
-            }
+            throw new Error('"before" parameter is required — specify which proof to insert above');
           }
 
           const block = `\nLemma ${name} : ${statement}.\nProof.\nAdmitted.\n\n`;
@@ -2086,12 +2000,9 @@ async function main() {
             if (e.message && e.message.startsWith('Lemma type error')) throw e;
           }
 
-          const insPos: Position = { line: targetLine + 3, character: 0 };
-          filePositions.set(file, insPos);
-
           return reply(
             `${fileLine(file, targetLine)} — added Lemma ${name}`,
-            { applied: true, cursor: insPos }
+            { applied: true }
           );
         }
 

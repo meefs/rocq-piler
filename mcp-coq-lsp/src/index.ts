@@ -871,7 +871,9 @@ async function main() {
       );
       const total = goals.length + bgGoals;
 
-      if (total === 0) return 'Proof complete. Use coq_insert_tactic "Qed." to close.';
+      if (total === 0) {
+        return 'Proof complete (or Admitted). Use coq_insert_tactic "Qed." to close.';
+      }
       if (goals.length === 0 && bgGoals > 0) return `Bullet closed. ${bgGoals} goal(s) in background. Insert next bullet.`;
       if (goals.length === 1) {
         if (bgGoals > 0) return `${bullet ? bullet + ' ' : ''}1 goal at focus, ${bgGoals} in background. Insert a tactic.`;
@@ -1009,13 +1011,34 @@ async function main() {
               didAutoRemove = true;
             }
           }
-          const viewPos = autoAdvancePosition(doc.text, position);
+          // Handle "Proof. Admitted." on one line: split into Proof.\n
+          if (!didAutoRemove) {
+            const prevLineIdx = insPos.line - 1;
+            if (prevLineIdx >= 0) {
+              const prevTrimmed = (docLines[prevLineIdx] || '').trim();
+              if (prevTrimmed.startsWith('Proof.') && prevTrimmed !== 'Proof.' &&
+                  (prevTrimmed.includes('Admitted.') || prevTrimmed.includes('Qed.') || prevTrimmed.includes('Defined.'))) {
+                const cleared = docManager.applyEdits(doc.text, [{
+                  range: { start: { line: prevLineIdx, character: 0 }, end: { line: prevLineIdx + 1, character: 0 } },
+                  newText: 'Proof.\n',
+                }]);
+                await docManager.updateDocument(file, cleared);
+                await docManager.saveDocument(file);
+                filePositions.set(file, { line: prevLineIdx, character: 0 });
+                didAutoRemove = true;
+              }
+            }
+          }
+          // Refresh document state after any auto-remove edit
+          const freshDoc = didAutoRemove ? docManager.getDocument(file)! : doc;
+          const freshLines = freshDoc.text.split('\n');
+          const viewPos = autoAdvancePosition(freshDoc.text, position);
           if (!filePositions.has(file)) filePositions.set(file, insPos);
 
           // Get proof tree — use Prev mode (shows goals even with Admitted present)
           const goalsResult = await retryDocumentNotReady(() =>
             lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-              textDocument: { uri: doc.uri, version: doc.version },
+              textDocument: { uri: freshDoc.uri, version: freshDoc.version },
               position,
               pp_format: 'Str',
               mode: 'Prev',
@@ -1028,10 +1051,10 @@ async function main() {
             const docInfo = await lspClient.sendRequest<{
               spans: Array<{ range: Range; ast?: unknown }>;
             }>('coq/getDocument', {
-              textDocument: { uri: doc.uri, version: doc.version },
+              textDocument: { uri: freshDoc.uri, version: freshDoc.version },
               ast: false,
             });
-            const fileLines = doc.text.split('\n');
+            const fileLines = freshDoc.text.split('\n');
             // Find the span that contains the current position (the proof statement)
             for (const span of docInfo.spans || []) {
               const s = span.range.start;

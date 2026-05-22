@@ -82,14 +82,16 @@ Should only show `Lemma`/`Theorem` items with Qed/Admitted status.
 
 ## Done
 
-- [x] **D1.** `coq_reset_proof` reports proof name (commit 43534f1)
-- [x] **D2.** `coq_focus`/`coq_reset_proof`/`coq_add_lemma` use names not positions (eef2d4e)
-- [x] **D3.** "done" → "done — try Qed" (40e6a4b)
-- [x] **D4.** Auto-indent based on bullet stack depth (b84f696)
-- [x] **D5.** Tool description: prefer explicit `as` clauses (9824885)
-- [x] **D6.** `coq_check` reports admitted count + line numbers (1a98364)
-- [x] **D7.** State messages: "bullet closed, N in background" (26ee254)
-- [x] **D8.** Qed replaces Admitted (3a6de0b)
-- [x] **D9.** History-based undo (fix for issue #5 from axiomander docs)
-- [x] **D10.** `coq_add_lemma` tool (0e3c4dd)
-- [x] **D11.** `coq_reset_proof` tool (1465173)
+- [x] **D1.** Template file `test_templates/pcf_ref.v` — all Admitted stub for testing
+- [x] **D2.** `coq_reset_proof` reports proof name (commit 43534f1)
+- [x] **D3.** `coq_focus`/`coq_reset_proof`/`coq_add_lemma` use names not positions (eef2d4e)
+- [x] **D4.** "done" → "done — try Qed" (40e6a4b)
+- [x] **D5.** Auto-indent based on bullet stack depth (b84f696)
+- [x] **D6.** Tool description: prefer explicit `as` clauses (9824885)
+- [x] **D7.** `coq_check` reports admitted count + line numbers (1a98364)
+- [x] **D8.** State messages: "bullet closed, N in background" (26ee254)
+- [x] **D9.** Qed replaces Admitted (3a6de0b)
+- [x] **D10.** History-based undo (fix for issue #5 from axiomander docs)
+- [x] **D11.** `coq_add_lemma` tool (0e3c4dd)
+- [x] **D12.** `coq_reset_proof` tool (1465173)
+- [x] **D13.** `coq_check` shows toplevel summary with per-item status (fe24ec8)

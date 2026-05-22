@@ -992,13 +992,14 @@ async function main() {
           // Refresh document state after any auto-remove edit
           const freshDoc = didAutoRemove ? docManager.getDocument(file)! : doc;
 
-          // Get proof tree — use Prev mode (shows goals even with Admitted present)
+          // Get proof tree at last point in proof (After mode shows current subgoals)
+          const lastPoint = insertPosition(doc.text, position);
           const goalsResult = await retryDocumentNotReady(() =>
             lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-              textDocument: { uri: freshDoc.uri, version: freshDoc.version },
-              position,
+              textDocument: { uri: doc.uri, version: doc.version },
+              lastPoint,
               pp_format: 'Str',
-              mode: 'Prev',
+              mode: 'After',
             })
           );
 

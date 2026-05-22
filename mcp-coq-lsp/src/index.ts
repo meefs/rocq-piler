@@ -438,11 +438,13 @@ async function main() {
         },
         {
           name: 'coq_apply_edit',
-          description: 'Apply text edits to a file and re-sync with rocq-lsp',
+          description: 'Apply text edits to a file and re-sync with rocq-lsp. Use "find"/"replace" for simple text search-and-replace instead of computing line numbers.',
           inputSchema: {
             type: 'object',
             properties: {
               file: { type: 'string' },
+              find: { type: 'string', description: 'Text to search for (use instead of edits for simple replacements)' },
+              replace: { type: 'string', description: 'Replacement text (use with find)' },
               edits: {
                 type: 'array',
                 items: {
@@ -476,7 +478,7 @@ async function main() {
                 },
               },
             },
-            required: ['file', 'edits'],
+            required: ['file'],
           },
         },
         {
@@ -989,6 +991,7 @@ async function main() {
           }
 
           // Auto-remove Admitted if proof body is empty (no tactics between Proof and Admitted)
+          let didAutoRemove = false;
           const insPos = insertPosition(doc.text, position);
           const insLine = (docLines[insPos.line] || '').trim();
           if ((insLine === 'Admitted.' || insLine === 'Qed.' || insLine === 'Defined.')) {
@@ -1003,6 +1006,7 @@ async function main() {
               await docManager.updateDocument(file, cleared);
               await docManager.saveDocument(file);
               filePositions.set(file, { line: insPos.line, character: 0 });
+              didAutoRemove = true;
             }
           }
           const viewPos = autoAdvancePosition(doc.text, position);
@@ -1050,7 +1054,7 @@ async function main() {
 
           // Format proof tree as text
           const parts: string[] = [];
-          parts.push(`${fileLine(file, position.line)}`);
+          parts.push(`${fileLine(file, position.line)}${didAutoRemove ? ' (auto-removed empty proof)' : ''}`);
 
           // Bullet level
           if (bullet) parts.push(`  bullet: ${bullet}`);
@@ -1100,6 +1104,7 @@ async function main() {
             shelved: shelf.length,
             given_up: givenUp.length,
             script: scriptLines,
+            auto_removed: didAutoRemove,
             next: hint,
             error: goalsResult.error || null,
           });
@@ -1178,9 +1183,11 @@ async function main() {
         }
 
         case 'coq_apply_edit': {
-          const { file, edits } = args as {
+          const { file, edits, find, replace } = args as {
             file: string;
-            edits: Array<{ range: Range; newText: string }>;
+            edits?: Array<{ range: Range; newText: string }>;
+            find?: string;
+            replace?: string;
           };
 
           // Get current document
@@ -1189,9 +1196,36 @@ async function main() {
             doc = await ensureDocumentOpened(file);
           }
 
+          // Resolve edits: either from explicit ranges or from text search
+          let resolvedEdits: Array<{ range: Range; newText: string }>;
+          if (find !== undefined) {
+            const idx = doc.text.indexOf(find);
+            if (idx === -1) {
+              return reply(`text not found: "${find.substring(0, 80)}"`, { found: false });
+            }
+            const before = doc.text.substring(0, idx);
+            const beforeLines = before.split('\n');
+            const findLines = find.split('\n');
+            const startLine = beforeLines.length - 1;
+            const startChar = beforeLines[beforeLines.length - 1].length;
+            const endLine = startLine + (findLines.length - 1);
+            const endChar = findLines.length === 1
+              ? startChar + find.length
+              : findLines[findLines.length - 1].length;
+            resolvedEdits = [{
+              range: {
+                start: { line: startLine, character: startChar },
+                end: { line: endLine, character: endChar },
+              },
+              newText: replace ?? '',
+            }];
+          } else {
+            resolvedEdits = edits || [];
+          }
+
           // Apply edits
           pushFileHistory(file, doc.text);
-          const newText = docManager.applyEdits(doc.text, edits);
+          const newText = docManager.applyEdits(doc.text, resolvedEdits);
 
           // Update and save
           await docManager.updateDocument(file, newText);
@@ -1199,9 +1233,12 @@ async function main() {
 
           const updatedDoc = docManager.getDocument(file)!;
 
+          const summary = find !== undefined
+            ? `replaced "${find.substring(0, 40)}${find.length > 40 ? '…' : ''}"`
+            : `applied ${resolvedEdits.length} edit(s)`;
           return reply(
-            `${fileLine(file, 0)} — applied ${edits.length} edit(s), v${updatedDoc.version}`,
-            { file, new_version: updatedDoc.version }
+            `${fileLine(file, 0)} — ${summary}, v${updatedDoc.version}`,
+            { file, new_version: updatedDoc.version, found: true }
           );
         }
 

@@ -310,7 +310,9 @@ async function main() {
         {
           name: 'coq_open_goals',
           description:
-            'Get current open goals at a given position in a Coq/Rocq file',
+            'Get current open goals at a given position in a Coq/Rocq file. ' +
+            'Uses Prev mode by default (shows state before the command at the position). ' +
+            'Position is optional — uses the cursor set by coq_focus if omitted.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -462,7 +464,9 @@ async function main() {
           description:
             'High-level helper: insert a tactic and return updated goals. ' +
             'Returns inserted_until (start of next line for chaining inserts) and ' +
-            'next_tactic_position (end of last inserted line for coq_try_tactic chaining).',
+            'next_tactic_position (end of last inserted line for coq_try_tactic chaining). ' +
+            'Auto-prepends bullet prefix (-, +, *) when proof state requires it. ' +
+            'Position is optional — uses cursor from previous coq_focus or coq_insert_tactic.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -562,7 +566,8 @@ async function main() {
         {
            name: 'coq_try_tactic',
           description:
-            'Single-call speculative tactic execution: get state, run tactic, and return updated goals.',
+            'Single-call speculative tactic execution: get state, run tactic, and return updated goals. ' +
+            'Position is optional — uses cursor if omitted. Does not modify the file.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -670,7 +675,10 @@ async function main() {
           name: 'coq_focus',
           description:
             'Get full proof tree: current goals, bullet stack depth/levels, ' +
-            'and the proof script up to the given position.',
+            'and the proof script up to the given position. ' +
+            'Sets the file cursor — subsequent coq_insert_tactic/coq_try_tactic calls ' +
+            'use this cursor automatically. Auto-removes empty Admitted stubs. ' +
+            'Uses Prev mode to show goals even when Admitted follows Proof.',
           inputSchema: {
             type: 'object',
             properties: {

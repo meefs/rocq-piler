@@ -47,3 +47,12 @@
 - [x] `coq_try_tactic` — single-call speculative tactic execution
 - [x] Fix `follow_with_goals` — query goals after inserted text, not at insertion point
 - [x] Dynamic workspace switching — auto-detect project root from file path
+
+## Indentation nesting bug (partial fix in 4c41c66)
+After closing a `-` bullet in an induction, a new `-` for the next case gets deeper indent because `proof/goals` reports remaining induction cases in the stack. The `hasActiveBullet` check doesn't help because the newly-prepended bullet IS active. Proper fix: need to distinguish between induction-case stack entries (root level) and actual bullet nesting entries (subgoals).
+
+## Induction bullets: can't extend compound semicolon tactics
+After `induction Hstep; ...` with semicolons partially closes cases, any remaining goal is at the top level (not inside any specific induction case). Additional tactics like `inversion Hty` run outside the induction context. Workaround: use explicit bullets `-` for each case instead of semicolons.
+
+## Bullet system overall: fragile for 21-case inductions
+The auto-bullet system works for simple proofs but breaks down for large inductions. The indent nesting and bullet detection issues make the proof script visually wrong even if Coq accepts it. Coq doesn't care about indentation (only bullet chars matter for grouping), but the visual misalignment is confusing for an LLM.

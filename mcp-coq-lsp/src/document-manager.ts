@@ -14,6 +14,53 @@ interface DocumentState {
   text: string;
 }
 
+export function applyTextEdits(
+  text: string,
+  edits: Array<{ range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string }>
+): string {
+  const lines = text.split('\n');
+
+  // Sort edits in reverse order (last edit first)
+  const sortedEdits = [...edits].sort((a, b) => {
+    if (a.range.start.line !== b.range.start.line) {
+      return b.range.start.line - a.range.start.line;
+    }
+    return b.range.start.character - a.range.start.character;
+  });
+
+  for (const edit of sortedEdits) {
+    const { start, end } = edit.range;
+
+    // Extract parts
+    const beforeStart = lines.slice(0, start.line);
+    const startLine = lines[start.line] || '';
+    const endLine = lines[end.line] || '';
+
+    const prefix = startLine.substring(0, start.character);
+    const suffix = endLine.substring(end.character);
+
+    const afterEnd = lines.slice(end.line + 1);
+
+    // Build new content
+    const newLines = edit.newText.split('\n');
+    let resultLines: string[];
+    if (newLines.length === 1) {
+      resultLines = [...beforeStart, prefix + newLines[0] + suffix, ...afterEnd];
+    } else {
+      const firstNew = prefix + newLines[0];
+      const lastNew = newLines[newLines.length - 1] + suffix;
+      const middleNew = newLines.slice(1, -1);
+      resultLines = [...beforeStart, firstNew, ...middleNew, lastNew, ...afterEnd];
+    }
+
+    // Update lines for next iteration
+    lines.length = 0;
+    lines.push(...resultLines);
+  }
+
+  return lines.join('\n');
+}
+
 export class DocumentManager {
   private documents = new Map<string, DocumentState>();
   private workspaceRoot: string;
@@ -177,48 +224,6 @@ export class DocumentManager {
     text: string,
     edits: Array<{ range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string }>
   ): string {
-    const lines = text.split('\n');
-
-    // Sort edits in reverse order (last edit first)
-    const sortedEdits = [...edits].sort((a, b) => {
-      if (a.range.start.line !== b.range.start.line) {
-        return b.range.start.line - a.range.start.line;
-      }
-      return b.range.start.character - a.range.start.character;
-    });
-
-    for (const edit of sortedEdits) {
-      const { start, end } = edit.range;
-
-      // Extract parts
-      const beforeStart = lines.slice(0, start.line);
-      const startLine = lines[start.line] || '';
-      const endLine = lines[end.line] || '';
-
-      const prefix = startLine.substring(0, start.character);
-      const suffix = endLine.substring(end.character);
-
-      const afterEnd = lines.slice(end.line + 1);
-
-      // Build new content
-      const newLines = edit.newText.split('\n');
-      const firstNew = prefix + newLines[0];
-      const lastNew = newLines[newLines.length - 1] + suffix;
-      const middleNew = newLines.slice(1, -1);
-
-      const resultLines = [
-        ...beforeStart,
-        firstNew,
-        ...middleNew,
-        lastNew,
-        ...afterEnd,
-      ];
-
-      // Update lines for next iteration
-      lines.length = 0;
-      lines.push(...resultLines);
-    }
-
-    return lines.join('\n');
+    return applyTextEdits(text, edits);
   }
 }

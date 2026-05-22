@@ -121,27 +121,55 @@ Proof. exists []; rewrite app_nil_r; reflexivity. Qed.
 Lemma nth_error_app_l : forall A (l1 l2 : list A) n x,
   nth_error l1 n = Some x -> nth_error (l1 ++ l2) n = Some x.
 Proof.
-Admitted.
+induction l1 as [| a l1' IH].
+- intros l2 n x H; destruct n; simpl in H; discriminate.
+- intros l2 n x H; destruct n; simpl in *; auto.
+Qed.
+
 
 Lemma has_type_weaken : forall G S1 S2 t T,
   has_type G S1 t T -> extends S2 S1 -> has_type G S2 t T.
 Proof.
+intros G S1 S2 t T Ht Hext. induction Ht; try (constructor; auto); try (constructor; apply IHHt; auto); try (constructor; [apply IHHt1 | apply IHHt2]; auto). destruct Hext as [S3 Heq]; subst; constructor; apply nth_error_app_l with (1 := H).
+- constructor; [apply IHHt1; auto | apply IHHt2; auto].
+- constructor; [apply IHHt1; auto | apply IHHt2; auto].
+- constructor; [apply IHHt1; auto | apply IHHt2; auto].
+- destruct Hext as [S3 Heq]. subst. apply nth_error_app_l. exact H.
+Qed.
+
 Admitted.
 
 Lemma extends_heap_ok : forall mu S S',
   heap_ok mu S -> extends S' S -> heap_ok mu S'.
 Proof.
-Admitted.
+Proof.
+  intros mu S S' H Hok Hext. induction Hok.
+  - apply heap_empty.
+  - apply heap_cons; [apply IHHok; auto | apply has_type_weaken with (1 := H0); auto | ].
+    destruct Hext as [S3 Heq]; subst; apply nth_error_app_l; exact H1.
+Qed.
+
 
 Lemma heap_ok_lookup : forall mu S l v,
   heap_ok mu S -> heap_lookup l mu = Some v ->
   exists T, nth_error S l = Some T /\ has_type [] S v T.
 Proof.
-Admitted.
+induction 1.
+- simpl. intro H; discriminate.
+- simpl. destruct (Nat.eqb_spec l l0).
+- subst; intro H2; injection H2 as [=]; subst; exists T; split; [exact H1 | exact H0].
+- exact IHheap_ok.
+Qed.
+
 
 Theorem preservation : forall t mu t' mu' T S,
   has_type [] S t T -> step t mu t' mu' ->
   heap_ok mu S ->
   exists S', extends S' S /\ heap_ok mu' S' /\ has_type [] S' t' T.
 Proof.
-Admitted.
+
+
+intro Hok; inversion H; subst; destruct (IHstep H3 Hok) as [S' [Hext [Hok' Ht']]]; exists S'; split; [exact Hext | split; [exact Hok' | apply T_Succ; exact Ht']].
+intro Hok; inversion H; subst.
+eexists S; split; [apply extends_refl | split; [exact Hok | econstructor; eauto using T_Num, T_Bool, T_Succ, T_Pred, T_IsZero, T_If]].
+Qed.

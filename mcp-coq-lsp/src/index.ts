@@ -1236,6 +1236,11 @@ async function main() {
 
           // Advance past Proof. and blank lines to the actual insert point
           const insPos = insertPosition(doc.text, position);
+          // Clamp to valid range for bullet query (avoid querying past EOF)
+          const bulletPos = {
+            line: Math.min(insPos.line, doc.text.split('\n').length - 1),
+            character: 0,
+          };
 
           // Auto-bullet: query proof state to determine if bullet prefix is needed
           let tactic = rawTactic.trim();
@@ -1243,7 +1248,7 @@ async function main() {
             const stateResult = await retryDocumentNotReady(() =>
               lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
                 textDocument: { uri: doc.uri, version: doc.version },
-                insPos,
+                bulletPos,
                 pp_format: 'Str',
                 mode: 'Prev',
               })

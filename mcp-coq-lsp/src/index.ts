@@ -170,6 +170,18 @@ async function main() {
     return t === 'Qed.' || t === 'Admitted.' || t === 'Defined.';
   }
 
+  function isTopLevelLine(line: string): boolean {
+    const t = line.trim();
+    const kw = t.split(/\s+/)[0];
+    return kw === 'Lemma' || kw === 'Theorem' || kw === 'Definition' ||
+           kw === 'Fixpoint' || kw === 'Inductive' || kw === 'CoFixpoint' ||
+           kw === 'Corollary' || kw === 'Example' || kw === 'Remark' ||
+           kw === 'Fact' || kw === 'Goal' || kw === 'Require' ||
+           kw === 'Import' || kw === 'Export' || kw === 'From' ||
+           kw === 'Notation' || kw === 'Ltac' || kw === 'Module' ||
+           kw === 'End';
+  }
+
   function insertPosition(text: string, pos: Position): Position {
     const lines = text.split('\n');
     let line = pos.line;
@@ -179,12 +191,13 @@ async function main() {
       if (!isSkipLine(lines[line])) break;
       line = line + 1;
     }
-    // Skip past non-blank content but stop at proof-ending keywords
+    // Skip past non-blank content but stop at proof-ending or toplevel keywords
     for (let i = 0; i < 200; i++) {
       if (line >= lines.length) break;
       const l = (lines[line] || '').trim();
       if (l === '') break;
       if (isProofEndLine(lines[line] || '')) break;
+      if (isTopLevelLine(lines[line] || '')) break;
       line = line + 1;
     }
     return { line, character: 0 };

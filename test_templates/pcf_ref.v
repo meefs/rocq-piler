@@ -1,4 +1,4 @@
-Require Import Arith List Compare_dec.
+Require Import Arith List Compare_dec Lia.
 Import ListNotations.
 
 (** * PCF with References — Template (all Admitted) *)
@@ -94,45 +94,77 @@ Inductive step : tm -> heap -> tm -> heap -> Prop :=
   | S_Assign2 : forall l t2 mu t2' mu', step t2 mu t2' mu' -> step (Assign (Loc l) t2) mu (Assign (Loc l) t2') mu'
   | S_AssignV : forall l v mu, value v -> step (Assign (Loc l) v) mu (Num 0) (heap_update l v mu).
 
-(* ---- Helper Lemmas ---- *)
-
-Lemma ctx_lookup_app : forall G1 G2 x T,
-  nth_error (G1 ++ G2) (length G1 + x) = Some T -> nth_error G2 x = Some T.
-Proof. Admitted.
-
-Lemma ctx_lookup_skip : forall G1 G2 x T,
-  nth_error (G1 ++ (T :: G2)) x = Some T -> x < length G1 -> nth_error G1 x = Some T.
-Proof. Admitted.
-
-Lemma substitution_preserves_typing : forall G1 G2 S x s t T,
-  has_type (G1 ++ G2) S s T ->
-  has_type (G1 ++ (T :: G2)) S t T ->
-  has_type (G1 ++ G2) S (subst (length G1) s t) T.
-Proof. Admitted.
-
 Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
-Lemma extends_refl : forall S, extends S S.
-Proof. Admitted.
 
-Lemma nth_error_app_l : forall A (l1 l2 : list A) n x,
-  nth_error l1 n = Some x -> nth_error (l1 ++ l2) n = Some x.
-Proof. Admitted.
 
-Lemma has_type_weaken : forall G S1 S2 t T,
-  has_type G S1 t T -> extends S2 S1 -> has_type G S2 t T.
-Proof. Admitted.
+Lemma extends_refl : forall S : store_ty, extends S S.
+Proof.
+  intro S. exists []. rewrite app_nil_r. reflexivity.
+Qed.
 
-Lemma extends_heap_ok : forall mu S S',
-  heap_ok mu S -> extends S' S -> heap_ok mu S'.
-Proof. Admitted.
 
-Lemma heap_ok_lookup : forall mu S l v,
-  heap_ok mu S -> heap_lookup l mu = Some v ->
-  exists T, nth_error S l = Some T /\ has_type [] S v T.
-Proof. Admitted.
+Lemma nth_error_app_l : forall (A : Type) (l1 l2 : list A) (n : nat) (x : A), nth_error l1 n = Some x -> nth_error (l1 ++ l2) n = Some x.
+Proof.
+  intros A l1. induction l1 as [|h t IH]; intros l2 n x H. - destruct n; simpl in H; discriminate. - destruct n; simpl in H; simpl. + exact H. + apply IH. exact H.
+Qed.
+
+
+Lemma has_type_weaken : forall G S1 S2 t T, has_type G S1 t T -> extends S2 S1 -> has_type G S2 t T.
+Proof.
+  intros G S1 S2 t T Hty Hext. destruct Hext as [S3 Heq]. subst S2. induction Hty; try (econstructor; eauto). apply T_Loc. apply nth_error_app_l. exact H.
+Qed.
+
+
+Lemma extends_heap_ok : forall mu S S', heap_ok mu S -> extends S' S -> heap_ok mu S'.
+Proof.
+  intros mu S S' Hok Hext. induction Hok. - constructor. - apply heap_cons with (T := T). + apply IHHok. exact Hext. + apply has_type_weaken with (S1 := S). exact H. exact Hext. + apply nth_error_app_l. destruct Hext as [S2 Heq]. subst S'. apply nth_error_app_l. exact H0.
+Qed.
+
+
+Lemma heap_ok_lookup : forall mu S l v, heap_ok mu S -> heap_lookup l mu = Some v -> exists T, nth_error S l = Some T /\ has_type [] S v T.
+Proof.
+  intros mu S l v Hok Hlook. induction Hok as [|l' v' mu' S' T Hok' IH Hty' Hnth]. - simpl in Hlook. discriminate. - simpl in Hlook. destruct (Nat.eqb l l') eqn:Heq. + apply Nat.eqb_eq in Heq. subst l'. injection Hlook as Heqv. subst v'. exists T. split; exact Hty' + Hnth. + apply IH. exact Hlook.
+Qed.
+
+
+Lemma substitution_preserves_typing : forall G1 G2 S s t T Ts, has_type (G1 ++ G2) S s Ts -> has_type (G1 ++ Ts :: G2) S t T -> has_type (G1 ++ G2) S (subst (length G1) s t) T.
+Proof.
+  intros G1 G2 S s t T Ts Hs Ht. revert G1 G2 S s T Ts Hs. induction Ht; intros G1 G2 S' s Tty Ts Hs; simpl.
+  - (* T_Var *) rename x into n. destruct (Nat.eqb n (length G1)) eqn:Heq. + apply Nat.eqb_eq in Heq. subst n. rewrite nth_error_app2 in H by auto. simpl in H. injection H as Htseq. subst Tty. exact Hs. + apply Nat.eqb_neq in Heq. apply T_Var. destruct (Nat.lt_or_ge n (length G1)) as [Hlt | Hge]. * rewrite nth_error_app1 in H by auto. rewrite nth_error_app1 by auto. exact H. * assert (n > length G1) by omega. destruct n as [|n']. { omega. } simpl. apply T_Var. rewrite nth_error_app2 in H by omega. rewrite nth_error_app2 by omega. simpl in H. simpl. replace (n' - length G1) with (S (n' - length G1 - 1)) by omega. rewrite <- H. f_equal. omega.
+  - constructor. - constructor. - constructor. apply IHHt with (Ts := Ts). exact Hs. exact H. - constructor. apply IHHt with (Ts := Ts). exact Hs. exact H. - constructor. apply IHHt with (Ts := Ts). exact Hs. exact H. - constructor. + apply IHHt1 with (Ts := Ts). exact Hs. exact H. + apply IHHt2 with (Ts := Ts). exact Hs. exact H0. + apply IHHt3 with (Ts := Ts). exact Hs. exact H1.
+Qed.
+
+
+Lemma heap_ok_update : forall mu S l v T, heap_ok mu S -> nth_error S l = Some T -> has_type [] S v T -> heap_ok (heap_update l v mu) S.
+Proof.
+  intros mu S l v T Hok Hnth Hv. induction Hok as [|l' v' mu' S' T' Hok' IH Hv' Hnth']. - simpl. constructor. - simpl. destruct (Nat.eqb l l') eqn:Heq. + apply Nat.eqb_eq in Heq. subst l'. apply heap_cons with (T := T). * exact Hok'. * assert (T = T') as Heqt. { rewrite Hnth' in Hnth. injection Hnth as Heqt. exact Heqt. } subst T'. exact Hv. * exact Hnth'. + apply heap_cons with (T := T'). * apply IH. * exact Hv'. * exact Hnth'.
+Qed.
 
 Theorem preservation : forall t mu t' mu' T S,
   has_type [] S t T -> step t mu t' mu' ->
-  heap_ok mu S ->
-  exists S', extends S' S /\ heap_ok mu' S' /\ has_type [] S' t' T.
-Proof. Admitted.
+  heap_ok mu S -> length mu = length S ->
+  exists S', extends S' S /\ heap_ok mu' S' /\ has_type [] S' t' T /\ length mu' = length S'.
+Proof.
+  intros t mu t' mu' Tty S Hty Hstep. revert Tty S Hty. induction Hstep; intros Tty S Hty Hok Hlen.
+  - (* S_Succ *) inversion Hty; subst. destruct (IHHstep TyNat S H2 Hok Hlen) as [S' [Hext [Hok' [Hty' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. constructor. exact Hty'. exact Hlen'.
+    - (* S_PredZero *) inversion Hty; subst. exists S. split. apply extends_refl. split. exact Hok. split. constructor. exact Hlen.
+    - (* S_PredSucc *) inversion Hty; subst. exists S. split. apply extends_refl. split. exact Hok. split. constructor. exact Hlen.
+    - (* S_Pred *) inversion Hty; subst. destruct (IHHstep TyNat S H2 Hok Hlen) as [S' [Hext [Hok' [Hty' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. constructor. exact Hty'. exact Hlen'.
+    - (* S_IsZeroZero *) inversion Hty; subst. exists S. split. apply extends_refl. split. exact Hok. split. constructor. exact Hlen.
+    - (* S_IsZeroSucc *) inversion Hty; subst. exists S. split. apply extends_refl. split. exact Hok. split. constructor. exact Hlen.
+    - (* S_IsZero *) inversion Hty; subst. destruct (IHHstep TyNat S H2 Hok Hlen) as [S' [Hext [Hok' [Hty' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. constructor. exact Hty'. exact Hlen'.
+    - (* S_IfTrue *) inversion Hty; subst. exists S. split. apply extends_refl. split. exact Hok. split. exact H6. exact Hlen.
+    - (* S_IfFalse *) inversion Hty; subst. exists S. split. apply extends_refl. split. exact Hok. split. exact H7. exact Hlen.
+    - (* S_If *) inversion Hty; subst. destruct (IHHstep TyBool S H4 Hok Hlen) as [S' [Hext [Hok' [Hty1' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. apply T_If. exact Hty1'. eapply has_type_weaken; eauto. eapply has_type_weaken; eauto. exact Hlen'.
+    - (* S_App1 *) inversion Hty; subst. destruct (IHHstep (TyArrow T1 Tty) S H3 Hok Hlen) as [S' [Hext [Hok' [Hty1' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. eapply T_App. exact Hty1'. eapply has_type_weaken; eauto. exact Hlen'.
+    - (* S_App2 *) inversion Hty; subst. destruct (IHHstep T1 S H6 Hok Hlen) as [S' [Hext [Hok' [Hty2' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. eapply T_App. eapply has_type_weaken; eauto. exact Hty2'. exact Hlen'.
+    - (* S_AppAbs *) inversion Hty; subst. inversion H4; subst. exists S. split. apply extends_refl. split. exact Hok. split. apply (substitution_preserves_typing [] [] S v2 t1 Tty T1). exact H6. simpl. exact H3. exact Hlen.
+    - (* S_Fix *) inversion Hty; subst. exists S. split. apply extends_refl. split. exact Hok. split. apply (substitution_preserves_typing [] [] S (Fix t) t Tty Tty). exact Hty. simpl. exact H2. exact Hlen.
+    - (* S_Ref *) inversion Hty; subst. destruct (IHHstep T S H2 Hok Hlen) as [S' [Hext [Hok' [Hty' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. constructor. exact Hty'. exact Hlen'.
+    - (* S_RefV *) inversion Hty; subst. exists (S ++ [T]). split. exists [T]. reflexivity. split. eapply heap_cons. eapply extends_heap_ok. exact Hok. exists [T]. reflexivity. eapply has_type_weaken. exact H3. exists [T]. reflexivity. rewrite nth_error_app2 by lia. rewrite Hlen. rewrite Nat.sub_diag. reflexivity. split. apply T_Loc. rewrite nth_error_app2 by lia. rewrite Hlen. rewrite Nat.sub_diag. reflexivity. rewrite app_length. simpl. lia.
+    - (* S_Deref *) inversion Hty; subst. destruct (IHHstep (TyRef Tty) S H2 Hok Hlen) as [S' [Hext [Hok' [Hty' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. constructor. exact Hty'. exact Hlen'.
+    - (* S_DerefLoc *) inversion Hty; subst. inversion H3; subst. destruct (heap_ok_lookup mu S l v Hok H) as [T [Hnth Htv]]. rewrite H5 in Hnth. injection Hnth as Heq. subst. exists S. split. apply extends_refl. split. exact Hok. split. exact Htv. exact Hlen.
+    - (* S_Assign1 *) inversion Hty; subst. destruct (IHHstep (TyRef T) S H3 Hok Hlen) as [S' [Hext [Hok' [Hty1' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. eapply T_Assign. exact Hty1'. eapply has_type_weaken; eauto. exact Hlen'.
+    - (* S_Assign2 *) inversion Hty; subst. destruct (IHHstep T S H5 Hok Hlen) as [S' [Hext [Hok' [Hty2' Hlen']]]]. exists S'. split. exact Hext. split. exact Hok'. split. eapply T_Assign. eapply has_type_weaken; eauto. exact Hty2'. exact Hlen'.
+    - (* S_AssignV *) inversion Hty; subst. inversion H3; subst. exists S. split. apply extends_refl. split. eapply heap_ok_update. exact Hok. exact H2. exact H5. split. constructor. assert (length (heap_update l v mu) = length mu) as Hupd. { induction mu as [|[l' v'] mu' IH]; simpl. reflexivity. destruct (Nat.eqb l l'); simpl; [reflexivity | f_equal; apply IH]. } rewrite Hupd. exact Hlen.
+Qed.

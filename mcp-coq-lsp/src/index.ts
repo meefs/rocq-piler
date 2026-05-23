@@ -837,10 +837,11 @@ async function main() {
       }
       if (goals.length === 0 && bgGoals > 0) return `Bullet closed. ${bgGoals} goal(s) in background. Insert next bullet.`;
       if (goals.length === 1) {
-        if (bgGoals > 0) return `${bullet ? bullet + ' ' : ''}1 goal at focus, ${bgGoals} in background. Insert a tactic.`;
+        if (bgGoals > 0) return `The current bullet ${bullet || '-'} is unfinished. 1 goal at focus, ${bgGoals} in background. Insert a tactic.`;
         return '1 goal. Insert a tactic.';
       }
       const summary = compactGoalSummary(gc);
+      if (bgGoals > 0) return `The current bullet ${bullet || '-'} is unfinished. ${goals.length} goals at focus, ${bgGoals} in background. ${summary}`;
       return `${goals.length} goals at focus. ${summary}${bullet ? ' (bullet ' + bullet + ')' : ''}`;
     }
 
@@ -1254,8 +1255,11 @@ async function main() {
             });
           } catch (e: any) {
             const msg = e?.message || String(e);
-            if (msg.includes('illegal begin of vernac')) {
-              // allow this error (e.g., Qed. or other vernac-level commands)
+            if (msg.includes('illegal begin of vernac') ||
+                msg.includes('No proof-editing in progress') ||
+                msg.includes('proof-editing') ||
+                (tactic === 'Qed.' || tactic === 'Defined.' || tactic === 'Admitted.')) {
+              // allow this error (e.g., Qed. or other vernac-level proof closers)
               // fall through to normal insertion
             } else {
               speculativeError = msg;
@@ -1352,7 +1356,7 @@ async function main() {
             ? 'goals query failed'
             : nFocus === 0 && nBg === 0 ? 'done — try Qed'
             : nFocus === 0 ? `bullet closed, ${nBg} in background`
-            : nBg > 0 ? `${nFocus} at focus, ${nBg} in background`
+            : nBg > 0 ? `${nFocus} at focus, ${nBg} in background (bullet unfinished)`
             : `${nFocus} goal(s)`;
 
           // Extract proof script for context
@@ -1423,12 +1427,31 @@ async function main() {
             const docLines = doc.text.split('\n');
             let admittedCount = 0;
             const admittedAt: number[] = [];
+            const admittedGoals: string[] = [];
             for (let i = 0; i < docLines.length; i++) {
               if (docLines[i].trim() === 'Admitted.') { admittedCount++; admittedAt.push(i); }
             }
+            // For each admitted position, query the proof goals to report what remains.
+            for (const line of admittedAt) {
+              try {
+                const gResult = await retryDocumentNotReady(() =>
+                  lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                    textDocument: { uri: doc.uri, version: doc.version },
+                    position: { line, character: 0 },
+                    pp_format: 'Str',
+                    mode: 'Prev',
+                  })
+                );
+                const nG = gResult.goals?.goals?.length || 0;
+                if (nG > 0) {
+                  admittedGoals.push(`L${line + 1}: ${nG} goal(s)`);
+                }
+              } catch {}
+            }
 
             const admittedInfo = admittedCount > 0
-              ? `, ${admittedCount} admitted (lines ${admittedAt.map(l => l + 1).join(', ')})`
+              ? `, ${admittedCount} admitted (${admittedAt.map(l => l + 1).join(', ')})` +
+                (admittedGoals.length > 0 ? ` — ${admittedGoals.join(', ')}` : '')
               : '';
 
             // Summary: scan file for toplevel names and their status
@@ -1716,7 +1739,11 @@ async function main() {
           const docLines = doc.text.split('\n');
           const proofLine = findProofLine(docLines, name);
           if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
-          const position = autoAdvancePosition(doc.text, { line: proofLine, character: 0 });
+          // Use insertPosition (same as coq_insert_tactic) to find the current
+          // proof cursor — this is the Admitted./Qed. line. Passing that position
+          // to get_state_at_pos in Prev mode gives the state after all preceding
+          // tactics, i.e. the current proof state.
+          const position = insertPosition(doc.text, { line: proofLine, character: 0 });
           const uri = doc.uri;
 
           async function getStateAt(pos: Position) {
@@ -1743,20 +1770,39 @@ async function main() {
           try {
             result = await tryRunTactic(stateResult.st);
           } catch (e: any) {
-            if (e?.message?.includes('illegal begin of vernac')) {
-              // User position was outside proof mode (e.g. on Proof. line).
-              // Find the first span after position and retry from its state.
+            if (e?.message?.includes('illegal begin of vernac') ||
+                e?.message?.includes('No proof-editing in progress')) {
+              // Position is outside proof mode — either before or after the proof body.
+              // Find the last span that ends before our position and retry from there.
               const docInfo = await retryDocumentNotReady(() =>
                 lspClient.sendRequest<{ spans: Array<{ range: Range }> }>('coq/getDocument', {
                   textDocument: { uri, version: doc.version }, ast: false,
                 })
               );
-              const spans = (docInfo.spans || []).filter(
-                s => s.range.start.line > position.line || (s.range.start.line === position.line && s.range.start.character > position.character)
-              ).sort((a, b) => a.range.start.line - b.range.start.line || a.range.start.character - b.range.start.character);
-              if (spans.length === 0) throw e;
-              const innerState = await getStateAt(spans[0].range.start);
-              result = await tryRunTactic(innerState.st);
+              const allSpans = docInfo.spans || [];
+              // First try: span just before position (we landed after proof end)
+              const spansBefore = allSpans.filter(
+                s => s.range.end.line < position.line ||
+                     (s.range.end.line === position.line && s.range.end.character <= position.character)
+              ).sort((a, b) => b.range.end.line - a.range.end.line || b.range.end.character - a.range.end.character);
+              if (spansBefore.length > 0) {
+                const prevSpan = spansBefore[0];
+                const prevPos: Position = { line: prevSpan.range.end.line, character: prevSpan.range.end.character };
+                try {
+                  const prevState = await getStateAt(prevPos);
+                  result = await tryRunTactic(prevState.st);
+                } catch {
+                  throw e;
+                }
+              } else {
+                // Fall back: try span just after position (we landed before proof start)
+                const spansAfter = allSpans.filter(
+                  s => s.range.start.line > position.line || (s.range.start.line === position.line && s.range.start.character > position.character)
+                ).sort((a, b) => a.range.start.line - b.range.start.line || a.range.start.character - b.range.start.character);
+                if (spansAfter.length === 0) throw e;
+                const innerState = await getStateAt(spansAfter[0].range.start);
+                result = await tryRunTactic(innerState.st);
+              }
             } else {
               throw e;
             }

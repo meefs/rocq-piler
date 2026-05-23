@@ -1236,6 +1236,39 @@ async function main() {
             // state query is best-effort for bullets
           }
 
+          // Speculative check: run tactic via Pétanque before editing the file.
+          // If it fails, report the Coq error without modifying the file.
+          let speculativeError: string | null = null;
+          try {
+            const stateResult = await retryDocumentNotReady(() =>
+              lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                uri: doc.uri,
+                position: insPos,
+                opts: { memo: true, hash: true },
+              })
+            );
+            await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+              st: stateResult.st,
+              tac: tactic,
+              opts: { memo: true, hash: true },
+            });
+          } catch (e: any) {
+            const msg = e?.message || String(e);
+            if (msg.includes('illegal begin of vernac')) {
+              // allow this error (e.g., Qed. or other vernac-level commands)
+              // fall through to normal insertion
+            } else {
+              speculativeError = msg;
+            }
+          }
+
+          if (speculativeError) {
+            return reply(
+              `${fileLine(file, proofLine)} — error: "${tactic}" — ${speculativeError}`,
+              { applied: false, error: speculativeError }
+            );
+          }
+
           // Insert tactic at insert point
           let insertText: string;
           let editEnd: Position;
@@ -1284,7 +1317,7 @@ async function main() {
           if (follow_with_goals ?? true) {
             try {
               const updatedDoc = docManager.getDocument(file)!;
-              const goalsQueryPos = safePos(insertedUntil, updatedDoc.text);
+              const goalsQueryPos = safePos(nextTacticPosition, updatedDoc.text);
               const goalsResult = await retryDocumentNotReady(() =>
                 lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
                   textDocument: {
@@ -1306,23 +1339,14 @@ async function main() {
           }
 
           const gcAfter = goals?.goals;
-          const msgs = (goals as any)?.messages || [];
-          const coqErrors: string[] = [];
-          for (const m of msgs) {
-            if (m.level >= 1 && typeof m.pp === 'string' && m.pp.trim()) {
-              coqErrors.push(m.pp.trim());
-            }
-          }
-
-          const queryError = goals?.error || (coqErrors.length > 0 ? coqErrors.join('; ') : undefined);
           const nFocus = gcAfter?.goals?.length ?? 0;
           const nBg = (gcAfter?.stack || []).reduce(
             (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
           );
           const hint = gcAfter ? nextHint(gcAfter) : '';
 
-          const stateMsg = queryError
-            ? `error: ${queryError}`
+          const stateMsg = goals?.error
+            ? `error: ${goals?.error}`
             : oneLineSplit ? 'inserted'
             : gcAfter === undefined || gcAfter === null
             ? 'goals query failed'

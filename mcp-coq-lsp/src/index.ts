@@ -1259,24 +1259,33 @@ async function main() {
             const firstWord = tactic.split(/\s+/)[0];
             const hasBullet = /^[-+*]+$/.test(firstWord) || firstWord === '{';
 
-            // Compute indent from stack depth (only for line-start insertions).
-            // When top stack level already has "before" entries, we're continuing
-            // in the same bullet group — use one less indent level.
+            // Compute indent by analyzing the proof body text before insPos.
+            // Find the last bullet or tactic line and match its indent level.
             const atLineStart = insPos.character === 0;
-            const hasActiveBullet = !!stateResult.goals?.bullet;
-            const stack = stateResult.goals?.stack || [];
-            const rawDepth = hasActiveBullet ? stack.length : 0;
-            // Check if we're continuing (not starting) in the current bullet group.
-            // Use the innermost stack level that has entries.
-            let continuing = false;
-            for (let i = stack.length - 1; i >= 0; i--) {
-              if ((stack[i]?.[0]?.length || 0) > 0 || (stack[i]?.[1]?.length || 0) > 0) {
-                continuing = (stack[i]?.[0]?.length || 0) > 0;
-                break;
+            let indent = '';
+            if (atLineStart && docLines && insPos.line > proofLine) {
+              let lastBulletIndent = -1;
+              let lastTacticIndent = -1;
+              for (let i = insPos.line - 1; i > proofLine; i--) {
+                const line = docLines[i] || '';
+                const trimmed = line.trimStart();
+                if (trimmed === '' || trimmed.startsWith('Proof.')) continue;
+                const lineIndent = line.length - trimmed.length;
+                const bulletMatch = trimmed.match(/^([-+*]+)\b/);
+                if (bulletMatch) {
+                  lastBulletIndent = lineIndent;
+                  break;
+                }
+                if (lastTacticIndent < 0) {
+                  lastTacticIndent = lineIndent;
+                }
+              }
+              if (lastBulletIndent >= 0) {
+                indent = ' '.repeat(Math.max(0, lastBulletIndent));
+              } else if (lastTacticIndent >= 0) {
+                indent = ' '.repeat(Math.max(0, lastTacticIndent));
               }
             }
-            const stackDepth = (hasActiveBullet && continuing) ? Math.max(0, rawDepth - 1) : rawDepth;
-            const indent = atLineStart ? '  '.repeat(stackDepth) : '';
 
             if (bullet && !hasBullet && tactic !== 'Qed.' && tactic !== 'Defined.' && tactic !== 'Admitted.') {
               tactic = `${indent}${bullet} ${tactic}`;

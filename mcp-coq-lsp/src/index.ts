@@ -27,7 +27,10 @@ import type {
   RunOpts,
 } from './types.js';
 import * as fs from 'fs';
-import { resolve as resolvePath } from 'path';
+import { dirname, resolve as resolvePath } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

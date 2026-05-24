@@ -96,39 +96,8 @@ Inductive step : tm -> heap -> tm -> heap -> Prop :=
 
 (* ---- Helper Lemmas ---- *)
 
-Lemma ctx_lookup_app : forall G1 G2 x T,
-  nth_error (G1 ++ G2) (length G1 + x) = Some T -> nth_error G2 x = Some T.
-Proof. Admitted.
-
-Lemma ctx_lookup_skip : forall G1 G2 x T,
-  nth_error (G1 ++ (T :: G2)) x = Some T -> x < length G1 -> nth_error G1 x = Some T.
-Proof. Admitted.
-
-Lemma substitution_preserves_typing : forall G1 G2 S x s t T,
-  has_type (G1 ++ G2) S s T ->
-  has_type (G1 ++ (T :: G2)) S t T ->
-  has_type (G1 ++ G2) S (subst (length G1) s t) T.
-Proof. Admitted.
-
 Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
 Lemma extends_refl : forall S, extends S S.
-Proof. Admitted.
-
-Lemma nth_error_app_l : forall A (l1 l2 : list A) n x,
-  nth_error l1 n = Some x -> nth_error (l1 ++ l2) n = Some x.
-Proof. Admitted.
-
-Lemma has_type_weaken : forall G S1 S2 t T,
-  has_type G S1 t T -> extends S2 S1 -> has_type G S2 t T.
-Proof. Admitted.
-
-Lemma extends_heap_ok : forall mu S S',
-  heap_ok mu S -> extends S' S -> heap_ok mu S'.
-Proof. Admitted.
-
-Lemma heap_ok_lookup : forall mu S l v,
-  heap_ok mu S -> heap_lookup l mu = Some v ->
-  exists T, nth_error S l = Some T /\ has_type [] S v T.
 Proof. Admitted.
 
 Theorem preservation : forall t mu t' mu' T S,

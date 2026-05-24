@@ -9,6 +9,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { RocqLspClient } from './lsp-client.js';
@@ -289,9 +291,40 @@ async function main() {
     {
       capabilities: {
         tools: {},
+        resources: {},
       },
     }
   );
+
+  // ── MCP Resources ──
+
+  // Load skill guide content at startup
+  const skillGuideUri = 'coq://skill-guide';
+  const skillGuideContent = fs.readFileSync(
+    resolvePath(__dirname, '../../SKILL.md'), 'utf-8'
+  );
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: [
+      {
+        uri: skillGuideUri,
+        name: 'Coq Proof Skill Guide',
+        description: 'Comprehensive reference for proving Coq/Rocq theorems using MCP coq-lsp tools. Covers proof strategy, bullet system, lemma management, common tactics, and troubleshooting.',
+        mimeType: 'text/markdown',
+      },
+    ],
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    if (request.params.uri === skillGuideUri) {
+      return {
+        contents: [{ uri: skillGuideUri, mimeType: 'text/markdown', text: skillGuideContent }],
+      };
+    }
+    throw new Error(`Unknown resource: ${request.params.uri}`);
+  });
+
+  // ── Tools ──
 
   // Tool: coq_open_goals
   server.setRequestHandler(ListToolsRequestSchema, async () => {

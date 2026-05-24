@@ -159,6 +159,38 @@ async function main() {
     fileHistory.set(path, stack);
   }
 
+  function bulletTokenFromMessage(message?: string): string | undefined {
+    return message?.match(/[-+*]+/)?.[0];
+  }
+
+  function nextChildBullet(parent: string | undefined): string {
+    if (!parent) return '-';
+    if (/^-+$/.test(parent)) return '+'.repeat(parent.length);
+    if (/^\++$/.test(parent)) return '*'.repeat(parent.length);
+    if (/^\*+$/.test(parent)) return '-'.repeat(parent.length + 1);
+    return '-';
+  }
+
+  function bulletLineInfo(line: string): { indent: number; token: string } | undefined {
+    const trimmed = line.trimStart();
+    const match = trimmed.match(/^([-+*]+)(?=\s|$)/);
+    if (!match) return undefined;
+    return { indent: line.length - trimmed.length, token: match[1] };
+  }
+
+  function findLastBulletIndent(
+    lines: string[],
+    startLineExclusive: number,
+    proofLine: number,
+    token?: string,
+  ): number | undefined {
+    for (let i = startLineExclusive - 1; i > proofLine; i--) {
+      const info = bulletLineInfo(lines[i] || '');
+      if (info && (!token || info.token === token)) return info.indent;
+    }
+    return undefined;
+  }
+
   /**
    * Open a document, first detecting and switching to its project root if needed.
    * This allows files from different Coq projects to be opened without restarting
@@ -1182,29 +1214,35 @@ async function main() {
             const bgCount = (stateResult.goals?.stack || []).reduce(
               (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
             );
-            const totalRemaining = (stateResult.goals?.goals?.length || 0) + bgCount;
-            
-            // Rotate bullet characters: -, +, *, -, +, *, ...
-            // This lets Coq's focus_stack grow properly (same character pops the prior).
-            const bulletChars = ['-', '+', '*'];
-            const activeLevels = (stateResult.goals?.stack || []).filter(
-              ([b, a]: any[]) => (b?.length || 0) + (a?.length || 0) > 0
-            ).length;
-            const nextBulletChar = bulletChars[activeLevels % bulletChars.length];
-            
-            const rawBullet = stateResult.goals?.bullet || (totalRemaining > 1 ? nextBulletChar : undefined);
-            const bulletMatch = rawBullet?.match(/[-+*]+/);
-            const bullet = bulletMatch ? bulletMatch[0] : (rawBullet === '-' || rawBullet === '+' || rawBullet === '*' ? rawBullet : undefined);
+            const focusedGoals = stateResult.goals?.goals?.length || 0;
+            const totalRemaining = focusedGoals + bgCount;
+            const lspBullet = stateResult.goals?.bullet;
+            const lspBulletChar = bulletTokenFromMessage(lspBullet);
+            const lspSuggestsNext = !!lspBullet?.includes('Focus next goal');
+            const lspUnfinished = !!lspBullet?.includes('unfinished') || !!lspBullet?.includes('not finished');
+            let bullet: string | undefined;
             const firstWord = tactic.split(/\s+/)[0];
             const hasBullet = /^[-+*]+$/.test(firstWord) || firstWord === '{';
 
-            // Compute indent fully first, then build tactic string with debug comment
             const atLineStart = insPos.character === 0;
             let indent = '';
 
-            if (bullet && !hasBullet && atLineStart) {
-              // Indent from active stack levels (computed above for bullet rotation)
-              indent = '  '.repeat(activeLevels);
+            if (lspSuggestsNext && lspBulletChar) {
+              // Coq says a sibling/current-level bullet is mandatory. Trust it.
+              bullet = lspBulletChar;
+              const suggestedIndent = findLastBulletIndent(docLines, insPos.line, proofLine, bullet);
+              indent = ' '.repeat(suggestedIndent ?? 0);
+            } else if (lspUnfinished && lspBulletChar && focusedGoals > 1) {
+              // Current bullet has multiple focused goals. Open a child bullet with
+              // a different token; same-token bullets pop/reuse the parent focus.
+              bullet = nextChildBullet(lspBulletChar);
+              const parentIndent = findLastBulletIndent(docLines, insPos.line, proofLine, lspBulletChar)
+                ?? computeBulletIndent(doc.text, insPos, proofLine).length;
+              indent = ' '.repeat(parentIndent + 2);
+            } else if (!lspBullet && totalRemaining > 1) {
+              // First bullet group in a proof branch.
+              bullet = '-';
+              indent = '';
             } else if (atLineStart) {
               indent = computeBulletIndent(doc.text, insPos, proofLine);
             }

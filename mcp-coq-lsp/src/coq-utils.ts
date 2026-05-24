@@ -115,7 +115,7 @@ export function computeBulletIndent(
     const trimmed = line.trimStart();
     if (trimmed === '' || trimmed.startsWith('Proof.')) continue;
     const lineIndent = line.length - trimmed.length;
-    const bulletMatch = trimmed.match(/^([-+*]+)\b/);
+    const bulletMatch = trimmed.match(/^([-+*]+)(?=\s|$)/);
     if (bulletMatch) {
       lastBulletIndent = lineIndent;
       break;

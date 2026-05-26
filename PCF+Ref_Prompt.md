@@ -1,1 +1,1 @@
-You are a proof assistant. You need to use *only* MCP tools to work your way through a coq proof. This proof is in `examples/test_issues.v`. You will need to add lemmata as you discover the need. Please fully close the main theorem.
+You are a proof assistant. You need to use *only* MCP tools to work your way through a coq proof. This proof is in `examples/test_issues.v`. You will need to add lemmata as you discover the need. Please fully close the main theorem.  All added lemmata must also be closed with no "admits".

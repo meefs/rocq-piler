@@ -1,8 +1,8 @@
-# Neurosymbolic Programming with Coq LSP
+# Neurosymbolic Programming with Rocq LSP
 
 ## Overview
 
-This project demonstrates how a **Language Server Protocol (LSP)** interface to the **Coq proof assistant** enables **neurosymbolic programming**: the seamless integration of neural networks (LLMs) with symbolic reasoning systems (proof assistants).
+This project demonstrates how a **Language Server Protocol (LSP)** interface to the **Rocq proof assistant** (formerly Coq) enables **neurosymbolic programming**: the seamless integration of neural networks (LLMs) with symbolic reasoning systems (proof assistants).
 
 ## What is Neurosymbolic Programming?
 
@@ -13,15 +13,15 @@ Neurosymbolic programming combines:
 
 This approach leverages the complementary strengths of both paradigms:
 
-| Neural (LLM) | Symbolic (Coq) |
-|--------------|----------------|
+| Neural (LLM) | Symbolic (Rocq) |
+|--------------|-----------------|
 | Intuition & pattern matching | Rigorous logical deduction |
 | Generates candidate solutions | Verifies correctness |
 | Probabilistic & approximate | Deterministic & exact |
 | Learns from examples | Reasons from axioms |
 | Fast but fallible | Slow but infallible |
 
-## How LSP Enables Neurosymbolic Coq Programming
+## How LSP Enables Neurosymbolic Rocq Programming
 
 ### The Traditional Problem
 
@@ -57,12 +57,12 @@ In this implementation, the bridge is also **project-aware**: it can detect Coq/
        ↓ (proposes tactics)
 ┌──────────────┐
 │  LSP Server  │  ← Bridges neural and symbolic systems
-│  (Interface) │  → Translates between LLM and Coq
+│  (Interface) │  → Translates between LLM and Rocq
 └──────┬───────┘
        │
        ↓ (executes & verifies)
 ┌──────────────┐
-│  Coq/Rocq    │  ← Verifies: type-checks, proves correctness
+│    Rocq      │  ← Verifies: type-checks, proves correctness
 │  (Symbolic)  │  → Returns: success/failure, updated goals
 └──────────────┘
 ```
@@ -71,7 +71,7 @@ In this implementation, the bridge is also **project-aware**: it can detect Coq/
 1. LLM reads proof goal via LSP (`coq_open_goals`)
 2. LLM generates candidate tactic(s) based on patterns learned from training
 3. Tactics are applied via LSP (`coq_insert_tactic`)
-4. Coq verifies the tactic is type-correct and logically sound
+4. Rocq verifies the tactic is type-correct and logically sound
 5. If successful: proof progresses (new subgoals or QED)
 6. If failed: error message guides LLM to try alternatives
 7. Loop continues until proof is complete
@@ -80,7 +80,7 @@ In this implementation, the bridge is also **project-aware**: it can detect Coq/
 
 This architecture achieves:
 
-**Guided Generation**: The LLM doesn't need to be "correct" — only creative. Coq acts as a discriminator that filters out invalid proofs.
+**Guided Generation**: The LLM doesn't need to be "correct" — only creative. Rocq acts as a discriminator that filters out invalid proofs.
 
 **Incremental Verification**: Each step is verified immediately, preventing cascading errors.
 
@@ -88,7 +88,7 @@ This architecture achieves:
 
 **Learning from Mistakes**: Structured error feedback allows the LLM to refine its search strategy.
 
-**Safe Automation**: The LLM can explore aggressively because Coq guarantees soundness.
+**Safe Automation**: The LLM can explore aggressively because Rocq guarantees soundness.
 
 ## Key Capabilities Enabled by LSP
 
@@ -122,7 +122,7 @@ The LLM can:
 ### 4. Error-Driven Learning
 
 The LLM can:
-- Receive structured error messages from Coq
+- Receive structured error messages from Rocq
 - Understand type mismatches, unification failures, etc.
 - Adjust tactics based on specific error feedback
 
@@ -130,7 +130,7 @@ The LLM can:
 
 ## Concrete Example: LLM Proving a Theorem
 
-**Goal**: Prove `forall n, n + 0 = n` in Coq
+**Goal**: Prove `forall n, n + 0 = n` in Rocq
 
 **Without LSP (traditional)**:
 ```coq
@@ -167,7 +167,7 @@ Qed.
 
 **Key neurosymbolic elements**:
 - LLM uses **pattern recognition** (recognizes ∀ needs intro, S needs induction)
-- Coq provides **verification** (each tactic is type-checked)
+- Rocq provides **verification** (each tactic is type-checked)
 - LSP provides **interaction protocol** (query → propose → verify → iterate)
 
 ## Architecture: This Project
@@ -182,30 +182,30 @@ This MCP (Model Context Protocol) server implements the LSP bridge:
               │ MCP Protocol
               │ (tool calls)
 ┌─────────────▼────────────────────────┐
-│  mcp-coq-lsp                         │
-│  • Exposes 14 MCP tools              │
+│  rocq-robot                          │
+│  • Exposes 20+ MCP tools             │
 │  • Manages document state            │
 │  • Handles LSP ↔ MCP translation     │
 └─────────────┬────────────────────────┘
               │ JSON-RPC (LSP + Pétanque)
               │ (stdio)
 ┌─────────────▼────────────────────────┐
-│  coq-lsp / rocq-lsp                  │
-│  • Type-checks Coq files             │
+│  rocq-lsp                            │
+│  • Type-checks Rocq files            │
 │  • Tracks proof state                │
 │  • Executes tactics                  │
 └─────────────┬────────────────────────┘
               │ OCaml API
               │
 ┌─────────────▼────────────────────────┐
-│  Coq/Rocq Kernel                     │
+│  Rocq Kernel                         │
 │  • Formal verification engine        │
 │  • Proof checker                     │
 │  • Type theory implementation        │
 └──────────────────────────────────────┘
 ```
 
-### MCP Tools for Neurosymbolic Coq
+### MCP Tools for Neurosymbolic Rocq
 
 #### Core Proof Interaction Tools
 
@@ -253,7 +253,7 @@ This MCP (Model Context Protocol) server implements the LSP bridge:
 
 ### Current Server Capabilities
 
-- **Dynamic workspace switching**: opening a file from another Coq project restarts `rocq-lsp` under the correct project root
+- **Dynamic workspace switching**: opening a file from another Rocq project restarts `rocq-lsp` under the correct project root
 - **Project-root detection**: walks upward looking for `_CoqProject`, `_RocqProject`, or `dune-project`
 - **Readable goal output**: goal responses are formatted for MCP clients with hypotheses first and goal rendered compactly
 - **Automatic bullet management**: `coq_insert_tactic` auto-prepends bullet prefixes (-, +, *) when the proof state requires them
@@ -267,7 +267,7 @@ This MCP (Model Context Protocol) server implements the LSP bridge:
 ## Benefits of This Approach
 
 ### For AI/LLM Developers
-- **Structured Interface**: No need to parse Coq syntax or output
+- **Structured Interface**: No need to parse Rocq syntax or output
 - **Immediate Feedback**: Know instantly if a tactic succeeds
 - **Safe Exploration**: Can't generate unsound proofs
 - **Reduced Search Space**: Type system eliminates invalid candidates
@@ -293,10 +293,10 @@ LLMs can tackle routine lemmas while experts focus on complex proofs.
 Generate code with machine-checked correctness proofs (e.g., crypto, compilers).
 
 ### 3. Mathematical Formalization
-Convert natural language math into Coq, assisted by LLMs.
+Convert natural language math into Rocq, assisted by LLMs.
 
 ### 4. Education
-Interactive tutoring systems that teach both intuition (LLM) and rigor (Coq).
+Interactive tutoring systems that teach both intuition (LLM) and rigor (Rocq).
 
 ### 5. AI Safety Research
 Build verifiably safe AI systems with formal guarantees.
@@ -305,16 +305,16 @@ Build verifiably safe AI systems with formal guarantees.
 
 ### Prerequisites
 ```bash
-# Install Coq and coq-lsp
-opam install coq coq-lsp
+# Install Rocq and rocq-lsp
+opam install coq-lsp  # rocq-lsp coming soon
 
 # Verify installation
-coq-lsp --version
+coq-lsp --version  # or rocq-lsp --version
 ```
 
 ### Installation
 ```bash
-cd mcp-coq-lsp/mcp-coq-lsp
+cd rocq-robot/mcp-coq-lsp
 npm install
 npm run build
 ```
@@ -325,23 +325,23 @@ Add to your MCP settings:
 ```json
 {
   "mcpServers": {
-    "coq-lsp": {
+    "rocq-robot": {
       "command": "node",
       "args": [
-        "/path/to/mcp-coq-lsp/mcp-coq-lsp/dist/index.js",
+        "/path/to/rocq-robot/mcp-coq-lsp/dist/index.js",
         "--workspace-root",
-        "/path/to/your/coq/project"
+        "/path/to/your/rocq/project"
       ]
     }
   }
 }
 ```
 
-The server can start with one workspace root and later switch automatically when a tool call targets a file inside a different Coq project.
+The server can start with one workspace root and later switch automatically when a tool call targets a file inside a different Rocq project.
 
 Then in OpenCode:
 ```
-You: "Help me prove that addition is commutative in Coq"
+You: "Help me prove that addition is commutative in Rocq"
 
 OpenCode: [Uses coq_open_goals to see the goal]
 OpenCode: [Uses coq_insert_tactic to try "induction n"]
@@ -375,7 +375,7 @@ The LLM successfully:
 5. Applied weakening lemmas where needed to adjust contexts
 6. Managed bullet-structured subgoals across 21 cases
 
-This demonstrates **neurosymbolic theorem proving in action**: the LLM proposes tactics guided by patterns, while Coq verifies each step is logically sound.
+This demonstrates **neurosymbolic theorem proving in action**: the LLM proposes tactics guided by patterns, while Rocq verifies each step is logically sound.
 
 ## Additional Examples
 
@@ -403,7 +403,7 @@ As demonstrated by the preservation theorem proof in this repository:
 - ✅ **LLM-driven theorem proving**: Complete non-trivial proofs (21 cases, multiple helper lemmas)
 - ✅ **Strategic proof planning**: Identifying needed lemmas and structuring induction proofs
 - ✅ **Interactive refinement**: Real-time tactic application with immediate verification feedback
-- ✅ **Error recovery**: Adjusting tactics based on Coq's structured error messages
+- ✅ **Error recovery**: Adjusting tactics based on Rocq's structured error messages
 - ✅ **Proof management**: Adding lemmas, resetting proofs, undoing operations
 
 ### What's Coming
@@ -421,8 +421,8 @@ As LLMs improve and proof assistants expose richer APIs:
 - **Implementation**: See `mcp-coq-lsp/IMPLEMENTATION.md`
 - **Quick Start**: See `mcp-coq-lsp/QUICKSTART.md`
 - **Project config detection**: See `mcp-coq-lsp/PROJECT-CONFIG-DETECTION.md`
-- **Coq Documentation**: https://coq.inria.fr/
-- **coq-lsp Project**: https://github.com/ejgallego/coq-lsp
+- **Rocq Documentation**: https://rocq-prover.org/
+- **rocq-lsp Project**: https://github.com/ejgallego/coq-lsp
 
 ## Contributing
 
@@ -438,6 +438,6 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Built with**: TypeScript, coq-lsp, Model Context Protocol
+**Built with**: TypeScript, rocq-lsp, Model Context Protocol
 
-**Enables**: LLMs + Coq = Formally Verified AI-Assisted Programming
+**Enables**: LLMs + Rocq = Formally Verified AI-Assisted Programming

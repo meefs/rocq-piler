@@ -1,11 +1,11 @@
 {
-  "name": "mcp-coq-lsp",
-  "version": "0.1.0",
-  "description": "MCP server for Coq/Rocq proof assistant integration via coq-lsp",
+  "name": "rocq-robot",
+  "version": "0.5.0",
+  "description": "MCP server for Rocq proof assistant integration via rocq-lsp - your AI companion for theorem proving",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "mcp-coq-lsp": "dist/index.js"
+    "rocq-robot": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",

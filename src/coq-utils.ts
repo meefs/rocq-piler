@@ -210,3 +210,43 @@ export function replaceAdmitLine(
     newText: prefix ? `${prefix}${tactic}\n` : `${tactic}\n`,
   }]);
 }
+
+/**
+ * Apply a tactic to all admit lines whose goal text matches a given hash.
+ * Re-queries after each replacement so line numbers stay fresh.
+ *
+ * getGoalText is injected — in production it calls the LSP, in tests it's mocked.
+ * Returns the new text and the count of replacements made.
+ */
+export async function replaceAllMatchingAdmits(
+  text: string,
+  proofName: string,
+  tactic: string,
+  targetHash: string,
+  getGoalText: (line: number, text: string) => Promise<string | null>
+): Promise<{ text: string; count: number }> {
+  const { createHash } = await import('crypto');
+  let currentText = text;
+  let count = 0;
+
+  while (true) {
+    const lines = currentText.split('\n');
+    const bounds = proofBounds(lines, proofName);
+    if (!bounds) break;
+    const admitLines = findAdmitLines(lines, bounds.proofLine, bounds.endLine);
+
+    let matched = -1;
+    for (const line of admitLines) {
+      const goalText = await getGoalText(line, currentText);
+      if (goalText === null) continue;
+      const h = createHash('md5').update(goalText).digest('hex').slice(0, 8);
+      if (h === targetHash) { matched = line; break; }
+    }
+    if (matched < 0) break;
+
+    currentText = replaceAdmitLine(currentText, matched, tactic);
+    count++;
+  }
+
+  return { text: currentText, count };
+}

@@ -16,7 +16,7 @@ import {
 import { RocqLspClient } from './lsp-client.js';
 import { DocumentManager, applyTextEdits } from './document-manager.js';
 import { detectProjectConfig, mergeProjectArgs, findProjectRoot } from './project-config.js';
-import { isSkipLine, isProofEndLine, isTopLevelLine, autoAdvancePosition, insertPosition, findProofLine, computeBulletIndent, proofBounds, findAdmitLines, bulletInsertPos, admitPrefix, replaceAdmitLine } from './coq-utils.js';
+import { isSkipLine, isProofEndLine, isTopLevelLine, autoAdvancePosition, insertPosition, findProofLine, computeBulletIndent, proofBounds, findAdmitLines, bulletInsertPos, admitPrefix, replaceAdmitLine, replaceAllMatchingAdmits } from './coq-utils.js';
 import type {
   Position,
   Range,
@@ -1415,25 +1415,13 @@ async function main() {
             }
             if (targetLines.length === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
 
-            // Apply tactic to ALL matching admits (same hash = same goal = same solution).
-            // Re-query after each replacement since line numbers shift.
+            // Apply tactic to ALL matching admits using shared replaceAllMatchingAdmits.
+            // getGoalText calls the LSP — same function as list_admitted uses.
             pushFileHistory(file, doc.text, null);
-            let currentText = doc.text;
-            let totalReplaced = 0;
-            const firstTargetLine = targetLines[0];
-
-            while (true) {
-              // Re-find admit lines in current text
-              const freshLines = currentText.split('\n');
-              const freshBounds = proofBounds(freshLines, name);
-              if (!freshBounds) break;
-              const freshAdmits = findAdmitLines(freshLines, freshBounds.proofLine, freshBounds.endLine);
-
-              // Find next admit matching hash
-              let nextTarget = -1;
-              for (const line of freshAdmits) {
+            const { text: finalText, count: totalReplaced } = await replaceAllMatchingAdmits(
+              doc.text, name, tactic, admit_hash,
+              async (line, currentText) => {
                 try {
-                  // Update doc with current text to query correct state
                   const tempDoc = await docManager.updateDocument(file, currentText);
                   const stateR = await lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
                     uri: tempDoc.uri, position: { line, character: 0 }, opts: { memo: false },
@@ -1441,20 +1429,15 @@ async function main() {
                   const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
                     st: stateR.st, opts: { compact: true },
                   });
-                  const goalText = (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
-                  const h = createHash('md5').update(goalText).digest('hex').slice(0, 8);
-                  if (h === admit_hash) { nextTarget = line; break; }
-                } catch {}
+                  return (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                } catch { return null; }
               }
-              if (nextTarget < 0) break;
-
-              currentText = replaceAdmitLine(currentText, nextTarget, tactic);
-              totalReplaced++;
-            }
+            );
 
             if (totalReplaced === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
-            await docManager.updateDocument(file, currentText);
+            await docManager.updateDocument(file, finalText);
             await docManager.saveDocument(file);
+            const firstTargetLine = 0; // approximate — used for reply location only
 
             // Force LSP re-sync before querying goals
             try {
@@ -1478,12 +1461,12 @@ async function main() {
               const nF = gc?.goals?.length ?? 0;
               const nB = (gc?.stack || []).reduce((s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0);
               if (nF > 0) {
-                const lines = currentText.split('\n');
+                const lines = finalText.split('\n');
                 const bulletLine = lines[firstLine] || '';
                 const match = bulletLine.match(/^(\s*[-+*])\s/);
                 const indent = match ? match[1].length : 2;
                 const seal = ' '.repeat(indent) + 'admit.\n';
-                const sealed = applyTextEdits(currentText, [{
+                const sealed = applyTextEdits(finalText, [{
                   range: { start: { line: firstLine + 1, character: 0 }, end: { line: firstLine + 1, character: 0 } },
                   newText: seal,
                 }]);

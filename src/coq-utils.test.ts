@@ -4,6 +4,7 @@ import {
   autoAdvancePosition, insertPosition, findProofLine,
   computeBulletIndent, proofBounds, findAdmitLines,
   admitPrefix, bulletInsertPos, replaceAdmitLine,
+  replaceAllMatchingAdmits,
 } from './coq-utils.js';
 import { applyTextEdits } from './document-manager.js';
 
@@ -971,5 +972,107 @@ describe('full admit workflow (deterministic)', () => {
     const bullets = lines.filter(l => /^\s*[-+*]/.test(l.trim()));
     // Should have: - admit., + admit., + exact I. (re-seal adds one)
     expect(bullets.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// replaceAllMatchingAdmits — same code path as admit_hash handler loop
+// ═══════════════════════════════════════════════════════════════════
+
+describe('replaceAllMatchingAdmits', () => {
+  const { createHash } = require('crypto');
+  const hashOf = (goal: string) => createHash('md5').update(goal).digest('hex').slice(0, 8);
+
+  // Mock getGoalText: maps line content patterns to goal text
+  const mockGetGoalText = (goalByLine: Record<string, string>) =>
+    async (line: number, text: string): Promise<string | null> => {
+      const lineContent = text.split('\n')[line] || '';
+      for (const [pattern, goal] of Object.entries(goalByLine)) {
+        if (lineContent.includes(pattern)) return goal;
+      }
+      return null;
+    };
+
+  it('replaces all admits with same goal hash', async () => {
+    const deep = [
+      'Lemma deep : (True /\\ True) /\\ (True /\\ True).',
+      'Proof.',
+      'split.',
+      '- split.',
+      '  + admit.',
+      '  + admit.',
+      '- split.',
+      '  + admit.',
+      '  + admit.',
+      'Admitted.',
+    ].join('\n');
+
+    const goalText = 'True';
+    const h = hashOf(goalText);
+    const { text, count } = await replaceAllMatchingAdmits(
+      deep, 'deep', 'exact I.', h,
+      mockGetGoalText({ '+ admit.': goalText })
+    );
+    expect(count).toBe(4);
+    expect(text).not.toContain('+ admit.');
+    expect(text).toContain('+ exact I.');
+  });
+
+  it('re-queries after each replacement — line numbers stay fresh', async () => {
+    const proof = [
+      'Lemma bar : True /\\ True /\\ True.',
+      'Proof.',
+      'split.',
+      '- admit.',
+      '- split.',
+      '  + admit.',
+      '  + admit.',
+      'Admitted.',
+    ].join('\n');
+
+    const goalText = 'True';
+    const h = hashOf(goalText);
+    const { text, count } = await replaceAllMatchingAdmits(
+      proof, 'bar', 'exact I.', h,
+      mockGetGoalText({ 'admit.': goalText })
+    );
+    expect(count).toBe(3);
+    expect(text).not.toContain('admit.');
+    expect(text).toContain('exact I.');
+  });
+
+  it('returns count=0 if hash does not match', async () => {
+    const proof = 'Lemma x : True.\nProof.\n- admit.\nAdmitted.';
+    const { text, count } = await replaceAllMatchingAdmits(
+      proof, 'x', 'exact I.', 'deadbeef',
+      mockGetGoalText({ 'admit.': 'True' })
+    );
+    expect(count).toBe(0);
+    expect(text).toBe(proof);
+  });
+
+  it('does not replace admits with different goal', async () => {
+    const proof = [
+      'Lemma mixed : True /\\ nat.',
+      'Proof.',
+      'split.',
+      '- admit.',   // goal: True
+      '- admit.',   // goal: nat
+      'Admitted.',
+    ].join('\n');
+
+    const trueHash = hashOf('True');
+    const { text, count } = await replaceAllMatchingAdmits(
+      proof, 'mixed', 'exact I.', trueHash,
+      async (line, t) => {
+        const content = t.split('\n')[line] || '';
+        // First admit gets 'True', second gets 'nat'
+        return content.includes('admit.') ? 
+          (line < 4 ? 'True' : 'nat') : null;
+      }
+    );
+    expect(count).toBe(1);
+    expect(text).toContain('- exact I.');
+    expect(text).toContain('- admit.'); // second one still there
   });
 });

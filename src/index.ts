@@ -721,6 +721,22 @@ async function main() {
             required: ['file', 'name', 'statement'],
           },
         },
+        {
+          name: 'delete_lemma',
+          description:
+            'Delete a lemma stub (Lemma name : statement. Proof. Admitted.) ' +
+            'above a specified proof. Use "before" to name which proof it goes above. ' +
+            'Cursor moves to the new proof.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', description: 'Path to a .v file' },
+              name: { type: 'string', description: 'Lemma name (e.g. "my_helper")' },
+              before: { type: 'string', description: 'Proof name to insert above (e.g. "preservation")' },
+            },
+            required: ['file', 'name', 'statement'],
+          },
+        },
       ],
     };
   });
@@ -2278,6 +2294,91 @@ async function main() {
           return reply(
             `${fileLine(file, targetLine)} — added Lemma ${name}`,
             { applied: true }
+          );
+        }
+
+        case 'delete_lemma': {
+          const { file, name } = args as {
+            file: string;
+            name: string | string[];
+          };
+
+          const names = Array.isArray(name) ? name : [name];
+          const doc = await ensureDocumentOpened(file);
+          const docLines = doc.text.split('\n');
+          let currentText = doc.text;
+          let totalDeleted = 0;
+
+          for (const lemmaName of names) {
+            // Find the Lemma/Theorem line
+            const s = lemmaName.trim();
+            let kwLine = -1;
+            for (let i = 0; i < docLines.length; i++) {
+              const l = docLines[i].trim();
+              const kw = l.split(/\s+/)[0];
+              if ((kw === 'Lemma' || kw === 'Theorem' || kw === 'Corollary' || kw === 'Example') &&
+                  l.includes(s + ' :')) {
+                kwLine = i;
+                break;
+              }
+            }
+            if (kwLine < 0) {
+              if (names.length === 1) throw new Error(`Lemma not found: "${s}"`);
+              continue;
+            }
+
+            // Find the Qed./Admitted. that closes it
+            let endLine = kwLine;
+            for (let j = kwLine + 1; j < docLines.length; j++) {
+              const l = docLines[j].trim();
+              if (l === 'Qed.' || l === 'Admitted.' || l === 'Defined.') {
+                endLine = j;
+                break;
+              }
+              if (isTopLevelLine(docLines[j] || '')) break;
+            }
+
+            // Remove the block including surrounding blank lines
+            let startDel = kwLine;
+            while (startDel > 0 && (docLines[startDel - 1] || '').trim() === '') startDel--;
+            let endDel = endLine + 1;
+            while (endDel < docLines.length && (docLines[endDel] || '').trim() === '') endDel++;
+
+            pushFileHistory(file, currentText, null);
+            currentText = docManager.applyEdits(currentText, [{
+              range: { start: { line: startDel, character: 0 }, end: { line: endDel, character: 0 } },
+              newText: '',
+            }]);
+
+            totalDeleted++;
+          }
+
+          if (totalDeleted === 0) throw new Error('No lemma found to delete');
+
+          await docManager.updateDocument(file, currentText);
+          await docManager.saveDocument(file);
+
+          // Force LSP re-sync
+          try {
+            await docManager.closeDocument(file);
+            await ensureDocumentOpened(file);
+            const freshDoc = docManager.getDocument(file)!;
+            await retryDocumentNotReady(() =>
+              lspClient.sendRequest('proof/goals', {
+                textDocument: { uri: freshDoc.uri, version: freshDoc.version },
+                position: { line: 0, character: 0 },
+                pp_format: 'Str',
+                mode: 'After',
+              })
+            );
+          } catch (e) {
+            console.error('[delete_lemma] re-sync failed:', e);
+          }
+
+          const namesStr = names.length === 1 ? `"${names[0]}"` : `${names.length} lemmas`;
+          return reply(
+            `${fileLine(file, 0)} — deleted ${namesStr}`,
+            { applied: true, deleted: totalDeleted, names }
           );
         }
 

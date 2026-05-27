@@ -233,6 +233,19 @@ Proof.
   replace (length l - length l) with 0 by lia. simpl. reflexivity.
 Qed.
 
+
+Lemma test_nested : (True /\ True) /\ (True /\ True).
+Proof.
+split.
+- split.
+  + exact I.
+  + exact I.
+- split.
+  + exact I.
+  + exact I.
+Qed.
+
+
 Theorem preservation : forall t mu t' mu' T S,
   has_type [] S t T -> step t mu t' mu' ->
   heap_ok mu S ->

@@ -157,6 +157,17 @@ Admitted.
 
 
 
+
+Lemma heap_ok_lookup : forall mu S l v, heap_ok mu S -> heap_lookup l mu = Some v -> exists T, nth_error S l = Some T /\ has_type [] S v T.
+Proof.
+  induction 1; intros k w Hlook; simpl in *.
+  - discriminate.
+  - destruct (Nat.eqb k l) eqn:Heq.
+    + injection Hlook; intros; subst.
+      exists T; split; auto. exact H0.
+    + apply IHheap_ok. exact Hlook.
+Qed.
+
 Theorem preservation : forall t mu t' mu' T S,
   has_type [] S t T -> step t mu t' mu' ->
   heap_ok mu S ->
@@ -208,7 +219,7 @@ Proof.
   - (* S_Deref *) intros T S Hty Hok. inversion Hty; subst.
     destruct (IHHstep (TyRef T) S H4 Hok) as [S' [Hext [Hok' Hty']]].
     exists S'; split; [exact Hext | split; [exact Hok' | apply T_Deref; exact Hty']].
-  - (* S_DerefLoc *) admit.
+  - (* S_DerefLoc *) 
   - (* S_Assign1 *) intros T S Hty Hok. inversion Hty; subst.
     destruct (IHHstep (TyRef T0) S H4 Hok) as [S' [Hext [Hok' Hty']]].
     exists S'; split; [exact Hext | split; [exact Hok' |
@@ -218,6 +229,6 @@ Proof.
     destruct (IHHstep T0 S H6 Hok) as [S' [Hext [Hok' Hty']]].
     exists S'; split; [exact Hext | split; [exact Hok' |
       apply T_Assign with (T := T0); [apply has_type_weaken with (S1 := S); [exact H4 | exact Hext] | exact Hty'] ] ].
-  - (* S_AssignV *) admit.
+  - (* S_AssignV *) 
   admit.
 Admitted.

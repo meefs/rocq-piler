@@ -1353,7 +1353,10 @@ async function main() {
 
           // Speculative check: run tactic via Pétanque before editing the file.
           // If it fails, report the Coq error without modifying the file.
+          // If it succeeds, show the resulting goals before committing.
           let speculativeError: string | null = null;
+          let specGoals: GoalConfig<string> | null = null;
+          let specFinished = false;
           try {
             const stateResult = await retryDocumentNotReady(() =>
               lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
@@ -1362,19 +1365,29 @@ async function main() {
                 opts: { memo: true, hash: true },
               })
             );
-            await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+            const runResult = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
               st: stateResult.st,
               tac: tactic,
               opts: { memo: true, hash: true },
             });
+            // Query resulting goals to preview what the tactic will do
+            try {
+              const g = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                st: runResult.st,
+                opts: { compact: true },
+              });
+              specGoals = g;
+              specFinished = runResult.proof_finished;
+            } catch {
+              // goal query is best-effort
+            }
           } catch (e: any) {
             const msg = e?.message || String(e);
             if (msg.includes('illegal begin of vernac') ||
                 msg.includes('No proof-editing in progress') ||
                 msg.includes('proof-editing') ||
                 (tactic === 'Qed.' || tactic === 'Defined.' || tactic === 'Admitted.')) {
-              // allow this error (e.g., Qed. or other vernac-level proof closers)
-              // fall through to normal insertion
+              // Allow Qed, Admitted, and proof-mode guard errors to pass through
             } else {
               speculativeError = msg;
             }
@@ -1382,9 +1395,23 @@ async function main() {
 
           if (speculativeError) {
             return reply(
-              `${fileLine(file, proofLine)} — error: "${tactic}" — ${speculativeError}`,
-              { applied: false, error: speculativeError }
+              `${fileLine(file, proofLine)} — spec check FAILED: \"${tactic}\"\n  Coq says: ${speculativeError}`,
+              { applied: false, error: speculativeError, tactic }
             );
+          }
+
+          // Build preview from spec goals
+          let specPreview = '';
+          if (specGoals) {
+            const nSpecGoals = specGoals.goals?.length || 0;
+            const specSummary = compactGoalSummary(specGoals);
+            if (specFinished) {
+              specPreview = '  (proof finished — Qed will be accepted)';
+            } else if (nSpecGoals > 0) {
+              specPreview = `  (${nSpecGoals} goal(s) after: ${specSummary})`;
+            } else {
+              specPreview = `  (${specSummary || 'no open goals'})`;
+            }
           }
 
           // Insert tactic at insert point
@@ -1546,7 +1573,7 @@ async function main() {
           });
 
           return reply(
-            `${fileLine(file, position.line)} — inserted "${tactic.trim()}" → ${stateMsg}${focusSummary ? '\n  ' + focusSummary : ''}${scriptBlock}${hint ? '\n  next: ' + hint : ''}`,
+            `${fileLine(file, position.line)} — inserted "${tactic.trim()}" → ${stateMsg}${specPreview ? '\n' + specPreview : ''}${focusSummary ? '\n  ' + focusSummary : ''}${scriptBlock}${hint ? '\n  next: ' + hint : ''}`,
             {
               applied: true,
               inserted_until: insertedUntil,

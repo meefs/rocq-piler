@@ -102,7 +102,7 @@ Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
 Lemma extends_refl : forall S, extends S S.
 Proof.
 intros S. unfold extends. exists []. symmetry. apply app_nil_r.
-Admitted.
+Qed.
 
 
 
@@ -147,8 +147,12 @@ Proof.
 split.
 - admit.
 - split.
-  + admit.
-  + admit.
+  + split.
+    * admit.
+    * exact I.
+  + split.
+    * exact I.
+    * admit.
 Admitted.
 
 

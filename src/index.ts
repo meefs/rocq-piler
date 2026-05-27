@@ -1439,7 +1439,7 @@ async function main() {
               const gc = goalsR?.goals;
               const nF = gc?.goals?.length ?? 0;
               const nB = (gc?.stack || []).reduce((s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0);
-              if (nF > 0 || nB > 0) {
+              if (nF > 0) {
                 // Bullet not closed — re-seal with admit
                 const lines = replaced.split('\n');
                 const bulletLine = lines[targetLine] || '';

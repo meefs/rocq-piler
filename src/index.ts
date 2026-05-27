@@ -1449,6 +1449,15 @@ async function main() {
             const specSummary = compactGoalSummary(specGoals);
             if (specFinished) {
               specPreview = '  (proof finished — Qed will be accepted)';
+            } else if (nSpecGoals === 1 && specGoals.goals[0]) {
+              const g = specGoals.goals[0];
+              const hypsFormatted = (g.hyps || []).map((h: any) => {
+                const names = h.names ? h.names.join(', ') : (h.name || '?');
+                const ty = (h.ty || '').replace(/\s+/g, ' ');
+                return `  ${names} : ${ty}`;
+              }).join('\n');
+              const goalTy = (g.ty || '').replace(/\s+/g, ' ');
+              specPreview = `  (after tactic — 1 goal):\n${hypsFormatted}\n  ⊢ ${goalTy}`;
             } else if (nSpecGoals > 0) {
               specPreview = `  (${nSpecGoals} goal(s) after: ${specSummary})`;
             } else {

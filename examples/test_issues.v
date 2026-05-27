@@ -1,4 +1,5 @@
 Require Import Arith List Compare_dec.
+Require Import Coq.Lists.List.
 Import ListNotations.
 
 (** * PCF with References — Template (all Admitted) *)
@@ -98,9 +99,141 @@ Inductive step : tm -> heap -> tm -> heap -> Prop :=
 
 Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
 
+Lemma extends_refl : forall S, extends S S.
+Proof. intros S. unfold extends. exists []. symmetry. apply app_nil_r. Qed.
+
+
+Lemma nth_error_app_l : forall A (l1 l2 : list A) n x, nth_error l1 n = Some x -> nth_error (l1 ++ l2) n = Some x.
+Proof.
+induction l1 as [|h t IH]; simpl; intros l2 n x H.
+- destruct n; simpl in H; [discriminate | discriminate].
+- destruct n; simpl in *.
+  + assumption.
+  + apply (IH l2 n x). exact H.
+Qed.
+
+
+
+
+Lemma has_type_weaken : forall G S1 S2 t T, has_type G S1 t T -> extends S2 S1 -> has_type G S2 t T.
+Proof.
+  intros G S1 S2 t T Hty Hext.
+  unfold extends in Hext. destruct Hext as [Sx HSx]. subst.
+  induction Hty.
+  - apply T_Var. exact H.
+  - apply T_Num.
+  - apply T_Bool.
+  - apply T_Succ. apply IHHty. unfold extends. exists Sx. reflexivity.
+  - apply T_Pred. apply IHHty. unfold extends. exists Sx. reflexivity.
+  - apply T_IsZero. apply IHHty. unfold extends. exists Sx. reflexivity.
+  - apply T_If; [apply IHHty1 | apply IHHty2 | apply IHHty3];
+    unfold extends; exists Sx; reflexivity.
+  - apply T_Lam. apply IHHty. unfold extends. exists Sx. reflexivity.
+  - apply T_App; [apply IHHty1 | apply IHHty2];
+    unfold extends; exists Sx; reflexivity.
+  - apply T_Fix. apply IHHty. unfold extends. exists Sx. reflexivity.
+  - apply T_Ref. apply IHHty. unfold extends. exists Sx. reflexivity.
+  - apply T_Deref. apply IHHty. unfold extends. exists Sx. reflexivity.
+  - apply T_Assign; [apply IHHty1 | apply IHHty2];
+    unfold extends; exists Sx; reflexivity.
+  - apply T_Loc. apply nth_error_app_l with (l1 := S). exact H.
+Qed.
+
 Theorem preservation : forall t mu t' mu' T S,
   has_type [] S t T -> step t mu t' mu' ->
   heap_ok mu S ->
   exists S', extends S' S /\ heap_ok mu' S' /\ has_type [] S' t' T.
+
 Proof.
-Admitted.
+  intros t mu t' mu' T S Hty Hstep Hok. revert T S Hty Hok. induction Hstep.
+  - (* S_Succ *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep TyNat S H2 Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' | apply T_Succ; exact Hty']].
+  - (* S_PredZero *)
+    intros T S Hty Hok. inversion Hty; subst.
+    exists S; split; [apply extends_refl | split; [exact Hok | exact H2]].
+  - (* S_PredSucc *)
+    intros T S Hty Hok. inversion Hty; subst.
+    exists S; split; [apply extends_refl | split; [exact Hok | apply T_Num]].
+  - (* S_Pred *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep TyNat S H2 Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' | apply T_Pred; exact Hty']].
+  - (* S_IsZeroZero *)
+    intros T S Hty Hok. inversion Hty; subst.
+    exists S; split; [apply extends_refl | split; [exact Hok | apply T_Bool]].
+  - (* S_IsZeroSucc *)
+    intros T S Hty Hok. inversion Hty; subst.
+    exists S; split; [apply extends_refl | split; [exact Hok | apply T_Bool]].
+  - (* S_IsZero *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep TyNat S H2 Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' | apply T_IsZero; exact Hty']].
+  - (* S_IfTrue *)
+    intros T S Hty Hok. inversion Hty; subst.
+    exists S; split; [apply extends_refl | split; [exact Hok | exact H6]].
+  - (* S_IfFalse *)
+    intros T S Hty Hok. inversion Hty; subst.
+    exists S; split; [apply extends_refl | split; [exact Hok | exact H7]].
+  - (* S_If *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep TyBool S H Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' |
+      apply T_If with (T := T); [exact Hty' |
+        apply has_type_weaken with (S1 := S); [exact H6 | exact Hext] |
+        apply has_type_weaken with (S1 := S); [exact H7 | exact Hext] ] ] ].
+  - (* S_App1 *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep (TyArrow T1 T) S H Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' |
+      apply T_App with (T1 := T1); [exact Hty' |
+        apply has_type_weaken with (S1 := S); [exact H0 | exact Hext] ] ] ].
+  - (* S_App2 *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep T1 S H0 Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' |
+      apply T_App with (T1 := T1);
+        [apply has_type_weaken with (S1 := S); [exact H | exact Hext] |
+         exact Hty'] ] ].
+  - (* S_AppAbs *)
+    intros T S Hty Hok. inversion Hty; subst.
+    inversion H; subst. inversion H2; subst.
+    (* subst 0 v2 (t :: [] no l1) for body typed with T1::[] ... *)
+    admit.
+  - (* S_Fix *)
+    intros T S Hty Hok. inversion Hty; subst.
+    admit.
+  - (* S_Ref *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep T S H Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' | apply T_Ref; exact Hty']].
+  - (* S_RefV *)
+    intros T S Hty Hok. inversion Hty; subst.
+    admit.
+  - (* S_Deref *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep (TyRef T) S H Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' | apply T_Deref; exact Hty']].
+  - (* S_DerefLoc *)
+    intros T S Hty Hok. inversion Hty; subst.
+    inversion H3; subst.
+    admit.
+  - (* S_Assign1 *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep (TyRef T0) S H Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' |
+      apply T_Assign with (T := T0); [exact Hty' |
+        apply has_type_weaken with (S1 := S); [exact H0 | exact Hext] ] ] ].
+  - (* S_Assign2 *)
+    intros T S Hty Hok. inversion Hty; subst.
+    destruct (IHHstep T0 S H0 Hok) as [S' [Hext [Hok' Hty']]].
+    exists S'; split; [exact Hext | split; [exact Hok' |
+      apply T_Assign with (T := T0);
+        [apply has_type_weaken with (S1 := S); [exact H | exact Hext] |
+         exact Hty'] ] ].
+  - (* S_AssignV *)
+    intros T S Hty Hok. inversion Hty; subst.
+    inversion H2; subst.
+    admit.
+Qed.

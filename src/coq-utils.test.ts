@@ -887,3 +887,66 @@ describe('replaceAdmitLine', () => {
     expect(tacticLine).toContain('* exact I.');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// Full admit workflow scenarios — simulating the MCP's deterministic path
+// ═══════════════════════════════════════════════════════════════════
+
+describe('full admit workflow (deterministic)', () => {
+  // Simulates: add_lemma → insert_tactic (split) → insert_tactic (admit) × 3
+  // → list_admitted → insert_tactic (admit_hash=X) → replace + insert + re-seal
+  const built = (() => {
+    let text = 'Lemma foo : True /\\ True /\\ True.\nProof.\nAdmitted.';
+    text = insertTactic(text, 'split.', 'foo');
+    text = insertTactic(text, 'admit.', 'foo', { bullet: '-' });
+    text = insertTactic(text, 'split.', 'foo', { bullet: '-' });
+    text = insertTactic(text, 'admit.', 'foo', { bullet: '+' });
+    text = insertTactic(text, 'admit.', 'foo', { bullet: '+' });
+    return text;
+  })();
+
+  it('builds a 3-level proof with 3 admits', () => {
+    const bounds = proofBounds(built.split('\n'), 'foo');
+    expect(bounds).not.toBeNull();
+    const admits = findAdmitLines(built.split('\n'), bounds!.proofLine, bounds!.endLine);
+    expect(admits).toHaveLength(3);
+  });
+
+  it('replaces first (-) admit with closing tactic, re-seals', () => {
+    const bounds = proofBounds(built.split('\n'), 'foo')!;
+    const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
+    const result = replaceAdmitLine(built, admits[0], 'exact I.');
+    expect(result).toContain('- exact I.');
+    expect(result).toContain('admit.'); // re-seal or remaining
+    expect(result).toContain('+ admit.'); // other admits survive
+  });
+
+  it('replaces nested (+) admit with non-closing tactic, re-seals', () => {
+    const bounds = proofBounds(built.split('\n'), 'foo')!;
+    const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
+    const line = admits.find(l => built.split('\n')[l].includes('+ admit.'))!;
+    const result = replaceAdmitLine(built, line, 'split.');
+    expect(result).toContain('+ split.');
+    expect(result).toContain('admit.'); // re-seal from split
+  });
+
+  it('bullet structure survives replacement', () => {
+    const bounds = proofBounds(built.split('\n'), 'foo')!;
+    const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
+    const result = replaceAdmitLine(built, admits[1], 'exact I.');
+    // All three bullet levels still present
+    expect(result).toContain('- admit.');
+    expect(result).toContain('+ exact I.');
+    expect(result).toContain('+ admit.');
+  });
+
+  it('replacing last admit leaves proof with all bullets at same levels', () => {
+    const bounds = proofBounds(built.split('\n'), 'foo')!;
+    const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
+    const result = replaceAdmitLine(built, admits[2], 'exact I.');
+    const lines = result.split('\n');
+    const bullets = lines.filter(l => /^\s*[-+*]/.test(l.trim()));
+    // Should have: - admit., + admit., + exact I. (re-seal adds one)
+    expect(bullets.length).toBeGreaterThanOrEqual(3);
+  });
+});

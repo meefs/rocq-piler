@@ -152,6 +152,8 @@ async function main() {
   const lastInsertion = new Map<string, { range: Range }>();
   // Track the active proof per file — used by coq_undo to scope undo to current proof
   const currentProof = new Map<string, string>();
+  // Track position of last replaced admit — used by insert_tactic to land on reopened bullet
+  const lastAdmitReplaced = new Map<string, number>();
 
   /** Clamp a position to be within [0, lines.length-1] — never past EOF. */
   function safePos(pos: Position, text: string): Position {
@@ -1342,7 +1344,15 @@ async function main() {
           const position = { line: proofLine, character: 0 };
 
           // Advance past Proof. and blank lines to the actual insert point
-          let insPos = insertPosition(doc.text, position);
+          let insPos: Position;
+          const admitPos = lastAdmitReplaced.get(file);
+          if (admitPos !== undefined) {
+            // replace_admit set this — insert at the reopened bullet position
+            insPos = { line: admitPos, character: 0 };
+            lastAdmitReplaced.delete(file);
+          } else {
+            insPos = insertPosition(doc.text, position);
+          }
 
           // Handle "Proof. Admitted." on one line: split so tactic goes between them
           // and Admitted. is preserved at the end
@@ -2600,6 +2610,8 @@ async function main() {
 
           // Set the active proof so undo/focus are scoped correctly
           currentProof.set(file, name);
+          // Store position so next insert_tactic lands on the reopened bullet
+          lastAdmitReplaced.set(file, targetLine);
 
           return reply(
             `${fileLine(file, targetLine)} — removed admit at L${targetLine + 1}, bullet reopened. Use insert_tactic now.`,

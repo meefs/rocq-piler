@@ -1396,7 +1396,8 @@ async function main() {
             const bounds = proofBounds(docLines, name);
             if (!bounds) throw new Error(`Proof not found: "${name}"`);
             const admitLines = findAdmitLines(docLines, bounds.proofLine, bounds.endLine);
-            let targetLine = -1;
+            // Collect ALL admit lines matching this hash
+            const targetLines: number[] = [];
             for (const line of admitLines) {
               try {
                 const stateR = await retryDocumentNotReady(() =>
@@ -1408,15 +1409,51 @@ async function main() {
                   st: stateR.st, opts: { compact: true },
                 });
                 const goalText = (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
-                const h = createHash("md5").update(`${line}:${goalText}`).digest("hex").slice(0, 8);
-                if (h === admit_hash) { targetLine = line; break; }
+                const h = createHash('md5').update(goalText).digest('hex').slice(0, 8);
+                if (h === admit_hash) targetLines.push(line);
               } catch {}
             }
-            if (targetLine < 0) throw new Error(`No admit found with hash "${admit_hash}"`);
+            if (targetLines.length === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
 
+            // Apply tactic to ALL matching admits (same hash = same goal = same solution).
+            // Re-query after each replacement since line numbers shift.
             pushFileHistory(file, doc.text, null);
-            const replaced = replaceAdmitLine(doc.text, targetLine, tactic);
-            await docManager.updateDocument(file, replaced);
+            let currentText = doc.text;
+            let totalReplaced = 0;
+            const firstTargetLine = targetLines[0];
+
+            while (true) {
+              // Re-find admit lines in current text
+              const freshLines = currentText.split('\n');
+              const freshBounds = proofBounds(freshLines, name);
+              if (!freshBounds) break;
+              const freshAdmits = findAdmitLines(freshLines, freshBounds.proofLine, freshBounds.endLine);
+
+              // Find next admit matching hash
+              let nextTarget = -1;
+              for (const line of freshAdmits) {
+                try {
+                  // Update doc with current text to query correct state
+                  const tempDoc = await docManager.updateDocument(file, currentText);
+                  const stateR = await lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                    uri: tempDoc.uri, position: { line, character: 0 }, opts: { memo: false },
+                  });
+                  const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                    st: stateR.st, opts: { compact: true },
+                  });
+                  const goalText = (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                  const h = createHash('md5').update(goalText).digest('hex').slice(0, 8);
+                  if (h === admit_hash) { nextTarget = line; break; }
+                } catch {}
+              }
+              if (nextTarget < 0) break;
+
+              currentText = replaceAdmitLine(currentText, nextTarget, tactic);
+              totalReplaced++;
+            }
+
+            if (totalReplaced === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
+            await docManager.updateDocument(file, currentText);
             await docManager.saveDocument(file);
 
             // Force LSP re-sync before querying goals
@@ -1429,10 +1466,11 @@ async function main() {
             let sealMsg = '';
             try {
               const freshDoc = docManager.getDocument(file)!;
+              const firstLine = targetLines[0];
               const goalsR = await retryDocumentNotReady(() =>
                 lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
                   textDocument: { uri: freshDoc.uri, version: freshDoc.version },
-                  position: { line: targetLine + 1, character: 0 },
+                  position: { line: firstLine + 1, character: 0 },
                   pp_format: 'Str', mode: 'After',
                 })
               );
@@ -1440,25 +1478,25 @@ async function main() {
               const nF = gc?.goals?.length ?? 0;
               const nB = (gc?.stack || []).reduce((s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0);
               if (nF > 0) {
-                // Bullet not closed — re-seal with admit
-                const lines = replaced.split('\n');
-                const bulletLine = lines[targetLine] || '';
+                const lines = currentText.split('\n');
+                const bulletLine = lines[firstLine] || '';
                 const match = bulletLine.match(/^(\s*[-+*])\s/);
                 const indent = match ? match[1].length : 2;
                 const seal = ' '.repeat(indent) + 'admit.\n';
-                const sealed = applyTextEdits(replaced, [{
-                  range: { start: { line: targetLine + 1, character: 0 }, end: { line: targetLine + 1, character: 0 } },
+                const sealed = applyTextEdits(currentText, [{
+                  range: { start: { line: firstLine + 1, character: 0 }, end: { line: firstLine + 1, character: 0 } },
                   newText: seal,
                 }]);
                 await docManager.updateDocument(file, sealed);
                 await docManager.saveDocument(file);
-                sealMsg = ` (re-sealed with admit — ${nF} focus, ${nB} bg)`;
+                sealMsg = ` (re-sealed with admit — ${nF} focus)`;
               }
             } catch { /* best-effort */ }
 
+            const n = targetLines.length;
             return reply(
-              `${fileLine(file, targetLine)} — replaced admit with "${tactic.trim()}"${sealMsg}`,
-              { applied: true }
+              `${fileLine(file, targetLines[0])} — replaced ${n} admit(s) with "${tactic.trim()}"${sealMsg}`,
+              { applied: true, count: n }
             );
           }
 
@@ -2729,7 +2767,7 @@ async function main() {
                 opts: { compact: true },
               });
               const goalText = (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
-              const hash = createHash("md5").update(`${line}:${goalText}`).digest("hex").slice(0, 8);
+              const hash = createHash("md5").update(goalText).digest("hex").slice(0, 8);
               admitted.push({ hash, line: line + 1, goal: goalText || '(no goals)' });
             } catch {
               admitted.push({ hash: 'error', line: line + 1, goal: '(could not query)' });
@@ -2767,7 +2805,7 @@ async function main() {
                 opts: { compact: true },
               });
               const goalText = (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
-              const h = createHash("md5").update(`${line}:${goalText}`).digest("hex").slice(0, 8);
+              const h = createHash("md5").update(goalText).digest("hex").slice(0, 8);
               if (h === hash) { targetLine = line; break; }
             } catch {}
           }

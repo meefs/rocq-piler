@@ -205,22 +205,8 @@ export function replaceAdmitLine(
   const prefix = admitPrefix(line);
   if (!line.includes('admit.')) return text;
 
-  // Remove admit line, keep bullet prefix
-  let result = applyTextEdits(text, [{
+  return applyTextEdits(text, [{
     range: { start: { line: admitLine, character: 0 }, end: { line: admitLine + 1, character: 0 } },
-    newText: prefix ? `${prefix}\n` : '',
+    newText: prefix ? `${prefix}${tactic}\n` : `${tactic}\n`,
   }]);
-
-  // Insert tactic after bullet prefix, then append admit.
-  const insertPos = bulletInsertPos(line);
-  const tacticLine = prefix
-    ? prefix.substring(0, insertPos) + tactic + '\n  ' + 'admit.'
-    : tactic + '\nadmit.';
-
-  result = applyTextEdits(result, [{
-    range: { start: { line: admitLine, character: 0 }, end: { line: admitLine + 1, character: 0 } },
-    newText: tacticLine + '\n',
-  }]);
-
-  return result;
 }

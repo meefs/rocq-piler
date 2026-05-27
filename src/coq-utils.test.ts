@@ -839,16 +839,16 @@ describe('replaceAdmitLine', () => {
     'Admitted.',
   ].join('\n');
 
-  it('replaces - admit. with - exact I. + re-seal admit', () => {
+  it('replaces - admit. with - exact I.', () => {
     const lines = proof.split('\n');
     const admitLine = lines.findIndex(l => l.includes('admit.'));
     expect(lines[admitLine]).toContain('- admit.');
     const result = replaceAdmitLine(proof, admitLine, 'exact I.');
     expect(result).toContain('- exact I.');
-    expect(result).toContain('admit.');  // re-seal
+    // Second - admit. in the proof still remains (only replaced first)
   });
 
-  it('replaces + admit. with + split. + re-seal', () => {
+  it('replaces + admit. with + split.', () => {
     const deeper = [
       'Lemma bar : True /\\ True.',
       'Proof.',
@@ -864,7 +864,9 @@ describe('replaceAdmitLine', () => {
     expect(lines[admitLine]).toContain('+ admit.');
     const result = replaceAdmitLine(deeper, admitLine, 'split.');
     expect(result).toContain('+ split.');
-    expect(result).toContain('admit.');  // re-seal
+    const resultLines = result.split('\n');
+    const remainingAdmits = resultLines.filter(l => l.includes('admit.'));
+    expect(remainingAdmits).toHaveLength(1); // only the OTHER + admit. remains
   });
 
   it('returns original text if line is not an admit', () => {
@@ -872,7 +874,7 @@ describe('replaceAdmitLine', () => {
     expect(result).toBe(proof);
   });
 
-  it('tactic line uses correct bullet prefix', () => {
+  it('preserves bullet prefix in replacement', () => {
     const deeper = [
       'Lemma baz : True.',
       'Proof.',
@@ -882,9 +884,8 @@ describe('replaceAdmitLine', () => {
     const lines = deeper.split('\n');
     const admitLine = lines.findIndex(l => l.includes('admit.'));
     const result = replaceAdmitLine(deeper, admitLine, 'exact I.');
-    const rLines = result.split('\n');
-    const tacticLine = rLines.find(l => l.includes('exact I.'));
-    expect(tacticLine).toContain('* exact I.');
+    expect(result).toContain('* exact I.');
+    expect(result).not.toContain('* admit.');
   });
 });
 
@@ -912,32 +913,33 @@ describe('full admit workflow (deterministic)', () => {
     expect(admits).toHaveLength(3);
   });
 
-  it('replaces first (-) admit with closing tactic, re-seals', () => {
+  it('replaces first (-) admit', () => {
     const bounds = proofBounds(built.split('\n'), 'foo')!;
     const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
     const result = replaceAdmitLine(built, admits[0], 'exact I.');
     expect(result).toContain('- exact I.');
-    expect(result).toContain('admit.'); // re-seal or remaining
+    expect(result).not.toContain('- admit.');
     expect(result).toContain('+ admit.'); // other admits survive
   });
 
-  it('replaces nested (+) admit with non-closing tactic, re-seals', () => {
+  it('replaces nested (+) admit', () => {
     const bounds = proofBounds(built.split('\n'), 'foo')!;
     const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
     const line = admits.find(l => built.split('\n')[l].includes('+ admit.'))!;
     const result = replaceAdmitLine(built, line, 'split.');
     expect(result).toContain('+ split.');
-    expect(result).toContain('admit.'); // re-seal from split
+    const resultLines = result.split('\n');
+    const remaining = resultLines.filter(l => l.includes('admit.'));
+    expect(remaining).toHaveLength(2); // other two admits still exist
   });
 
   it('bullet structure survives replacement', () => {
     const bounds = proofBounds(built.split('\n'), 'foo')!;
     const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
     const result = replaceAdmitLine(built, admits[1], 'exact I.');
-    // All three bullet levels still present
-    expect(result).toContain('- admit.');
-    expect(result).toContain('+ exact I.');
-    expect(result).toContain('+ admit.');
+    expect(result).toContain('- admit.');    // first admit still there
+    expect(result).toContain('+ exact I.'); // replaced
+    expect(result).toContain('+ admit.');   // other admit survives
   });
 
   it('replacing last admit leaves proof with all bullets at same levels', () => {

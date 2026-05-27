@@ -14,7 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { RocqLspClient } from './lsp-client.js';
-import { DocumentManager } from './document-manager.js';
+import { DocumentManager, applyTextEdits } from './document-manager.js';
 import { detectProjectConfig, mergeProjectArgs, findProjectRoot } from './project-config.js';
 import { isSkipLine, isProofEndLine, isTopLevelLine, autoAdvancePosition, insertPosition, findProofLine, computeBulletIndent, proofBounds, findAdmitLines, bulletInsertPos, admitPrefix, replaceAdmitLine } from './coq-utils.js';
 import type {
@@ -1418,8 +1418,40 @@ async function main() {
             const replaced = replaceAdmitLine(doc.text, targetLine, tactic);
             await docManager.updateDocument(file, replaced);
             await docManager.saveDocument(file);
+
+            // Query goals to check if tactic closed the bullet; seal if not
+            let sealMsg = '';
+            try {
+              const freshDoc = docManager.getDocument(file)!;
+              const goalsR = await retryDocumentNotReady(() =>
+                lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                  textDocument: { uri: freshDoc.uri, version: freshDoc.version },
+                  position: { line: targetLine, character: 0 },
+                  pp_format: 'Str', mode: 'After',
+                })
+              );
+              const gc = goalsR?.goals;
+              const nF = gc?.goals?.length ?? 0;
+              const nB = (gc?.stack || []).reduce((s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0);
+              if (nF > 0 || nB > 0) {
+                // Bullet not closed — re-seal with admit
+                const lines = replaced.split('\n');
+                const bulletLine = lines[targetLine] || '';
+                const match = bulletLine.match(/^(\s*[-+*])\s/);
+                const indent = match ? match[1].length : 2;
+                const seal = ' '.repeat(indent) + 'admit.\n';
+                const sealed = applyTextEdits(replaced, [{
+                  range: { start: { line: targetLine + 1, character: 0 }, end: { line: targetLine + 1, character: 0 } },
+                  newText: seal,
+                }]);
+                await docManager.updateDocument(file, sealed);
+                await docManager.saveDocument(file);
+                sealMsg = ` (re-sealed with admit — ${nF} focus, ${nB} bg)`;
+              }
+            } catch { /* best-effort */ }
+
             return reply(
-              `${fileLine(file, targetLine)} — replaced admit with "${tactic.trim()}"`,
+              `${fileLine(file, targetLine)} — replaced admit with "${tactic.trim()}"${sealMsg}`,
               { applied: true }
             );
           }

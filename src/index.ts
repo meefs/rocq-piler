@@ -1395,6 +1395,47 @@ async function main() {
             tactic = tactic + '.';
           }
           const dotCount = (tactic.match(/\./g) || []).length;
+
+          // Multi-tactic one-liner: validate each .-separated sub-tactic independently.
+          // If the nth fails, insert only the first n-1 (successful) sub-tactics.
+          let subTactics: string[] | null = null;
+          let failedAt: number = -1;
+          let failedError: string = '';
+          if (dotCount > 1 && !fromAdmitReplacement) {
+            subTactics = tactic.split('.').filter(s => s.trim()).map(s => s.trim() + '.');
+            let stateId: number | null = null;
+            for (let i = 0; i < subTactics.length; i++) {
+              try {
+                const stateR = await retryDocumentNotReady(() =>
+                  lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                    uri: doc.uri,
+                    position: insPos,
+                    opts: { memo: false },
+                  })
+                );
+                await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                  st: stateR.st,
+                  tac: subTactics[i],
+                  opts: { memo: false },
+                });
+              } catch (e: any) {
+                failedAt = i;
+                failedError = e?.message || String(e);
+                break;
+              }
+            }
+            if (failedAt >= 0) {
+              if (failedAt === 0) {
+                // First sub-tactic failed — reject entirely
+                return reply(
+                  `${fileLine(file, proofLine)} — spec check FAILED on sub-tactic 1: \"${subTactics[0]}\"\n  Coq says: ${failedError}`,
+                  { applied: false, error: failedError, sub_tactic: 1 }
+                );
+              }
+              // Insert successful sub-tactics, leave the rest
+              tactic = subTactics.slice(0, failedAt).join(' ');
+            }
+          }
           if (!fromAdmitReplacement) {
           try {
             // Query at end of previous non-blank line to get correct stack depth
@@ -1726,8 +1767,11 @@ async function main() {
             range: { start: insPos, end: nextTacticPosition },
           });
 
-          return reply(
-            `${fileLine(file, position.line)} — inserted "${tactic.trim()}" → ${stateMsg}${specPreview ? '\n' + specPreview : ''}${focusSummary ? '\n  ' + focusSummary : ''}${scriptBlock}${hint ? '\n  next: ' + hint : ''}`,
+          const summary = `${fileLine(file, position.line)} — inserted "${tactic.trim()}" → ${stateMsg}` +
+            (failedAt > 0 ? `\n  (sub-tactics 1-${failedAt} inserted; sub-tactic ${failedAt + 1} \"${subTactics?.[failedAt]}\" failed: ${failedError})` : '') +
+            `${specPreview ? '\n' + specPreview : ''}${focusSummary ? '\n  ' + focusSummary : ''}${scriptBlock}${hint ? '\n  next: ' + hint : ''}`;
+
+          return reply(summary,
             {
               applied: true,
               inserted_until: insertedUntil,

@@ -2598,11 +2598,13 @@ async function main() {
           if (targetLine < 0) throw new Error(`No admit found with hash "${hash}"`);
 
           pushFileHistory(file, doc.text, currentProof.get(file));
-          // Remove the admit. line — bullet is now open for new tactics.
-          // If user doesn't close the bullet, the proof's final Admitted. covers it.
+          // Replace admit. with just the bullet marker — keeps the bullet open for new tactics.
+          const admitLine = docLines[targetLine];
+          const admitIdx = admitLine.indexOf('admit.');
+          const bulletPrefix = admitIdx > 0 ? admitLine.substring(0, admitIdx) : '';
           const newText = docManager.applyEdits(doc.text, [{
             range: { start: { line: targetLine, character: 0 }, end: { line: targetLine + 1, character: 0 } },
-            newText: '',
+            newText: bulletPrefix ? `${bulletPrefix}\n` : '',
           }]);
 
           await docManager.updateDocument(file, newText);

@@ -1,6 +1,5 @@
 Require Import Arith List Compare_dec.
 Import ListNotations.
-Ltac loop := try (apply False); loop.
 
 (** * PCF with References — Template (all Admitted) *)
 
@@ -245,14 +244,6 @@ split.
   + exact I.
   + exact I.
 Qed.
-
-
-
-
-Lemma test_loop : True.
-Proof.
-Admitted.
-
 Theorem preservation : forall t mu t' mu' T S,
   has_type [] S t T -> step t mu t' mu' ->
   heap_ok mu S ->

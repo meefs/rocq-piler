@@ -260,16 +260,16 @@ split.
   + admit.
 Admitted.
 
-
 Lemma test_deep : (True /\ True) /\ (True /\ True).
 Proof.
 split.
 - split.
-  + split.
-   admit.
-  + admit.
+  + exact I.
+  + exact I.
+   exact I.
+  admit.
 - split.
-  + admit.
+  + exact I.
   + admit.
 Admitted.
 

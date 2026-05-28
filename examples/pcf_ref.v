@@ -102,6 +102,11 @@ Inductive step : tm -> heap -> tm -> heap -> Prop :=
 
 Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
 
+
+Lemma substitution_preserves_typing : forall G S t T U s, has_type (G ++ U :: []) S t T -> has_type G S s U -> has_type G S (subst (length G) s t) T.
+Proof.
+Admitted.
+
 Theorem preservation :
   forall t mu t' mu' T S,
     has_type [] S t T ->
@@ -112,4 +117,28 @@ Theorem preservation :
       heap_ok mu' S' /\
       has_type [] S' t' T.
 Proof.
+  intros t mu t' mu' T S Hty Hstep Hok.
+  revert T S Hty Hok.
+  induction Hstep; intros T0 S Hty Hok.
+  - (* S_Succ *) inversion Hty; subst. destruct (IHHstep TyNat S H2 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_PredZero *) inversion Hty; subst. exists S; eauto.
+  - (* S_PredSucc *) inversion Hty; subst. exists S; eauto.
+  - (* S_Pred *) inversion Hty; subst. destruct (IHHstep TyNat S H2 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_IsZeroZero *) inversion Hty; subst. exists S; eauto.
+  - (* S_IsZeroSucc *) inversion Hty; subst. exists S; eauto.
+  - (* S_IsZero *) inversion Hty; subst. destruct (IHHstep TyNat S H2 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_IfTrue *) inversion Hty; subst. exists S; eauto.
+  - (* S_IfFalse *) inversion Hty; subst. exists S; eauto.
+  - (* S_If *) inversion Hty; subst. destruct (IHHstep TyBool S H3 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_App1 *) inversion Hty; subst. destruct (IHHstep (TyArrow T1 T0) S H3 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_App2 *) inversion Hty; subst. destruct (IHHstep T1 S H5 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_AppAbs *) admit.
+  - (* S_Fix *) admit.
+  - (* S_Ref *) inversion Hty; subst. destruct (IHHstep T0 S H2 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_RefV *) inversion Hty; subst. inversion H0; subst. exists (S ++ [T0]). unfold extends. repeat split; eauto. { exists [T0]. reflexivity. } { induction Hok. constructor. eapply heap_cons with (T:=T). apply IHHok. apply H1. apply nth_error_app_l. apply H3. } { apply T_Loc. apply nth_error_last. }
+  - (* S_Deref *) inversion Hty; subst. destruct (IHHstep (TyRef T0) S H2 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_DerefLoc *) inversion Hty; subst. inversion H0; subst. induction Hok; simpl in *. discriminate. destruct (Nat.eqb l l0) eqn:Heq. injection H; intros; subst. exists S; eauto. apply IHHok; auto.
+  - (* S_Assign1 *) inversion Hty; subst. destruct (IHHstep (TyRef T1) S H2 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_Assign2 *) inversion Hty; subst. destruct (IHHstep T1 S H4 Hok) as [S' [? [? ?]]]. exists S'; eauto.
+  - (* S_AssignV *) inversion Hty; subst. inversion H0; subst. exists S. repeat split; eauto. { induction Hok. constructor. destruct (Nat.eqb l0 l) eqn:Heq. subst. rewrite Nat.eqb_refl. apply heap_cons with (T:=T0); auto. rewrite H3 in H1. injection H1; intros; subst; auto. rewrite Nat.eqb_sym. rewrite Heq. apply heap_cons with (T:=T); auto. } { apply T_Num. }
 Admitted.

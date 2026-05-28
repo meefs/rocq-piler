@@ -22,9 +22,10 @@ export function fixture(name: string): string {
   return path.join(FIXTURES_DIR, name);
 }
 
-/** Create a temp copy of a fixture inside the fixtures dir (so coq-lsp indexes it). */
-export function tempFixture(name: string, suffix: string): string {
-  const src = fixture(name);
+/** Create a temp copy of a fixture inside the fixtures dir (so coq-lsp indexes it).
+ *  Optional srcDir overrides the source directory (defaults to FIXTURES_DIR). */
+export function tempFixture(name: string, suffix: string, srcDir?: string): string {
+  const src = path.join(srcDir ?? FIXTURES_DIR, name);
   const dst = path.join(FIXTURES_DIR, `_tmp_${suffix}_${process.pid}.v`);
   fs.copyFileSync(src, dst);
   return dst;

@@ -1131,7 +1131,14 @@ async function main() {
             if (admitted.length > 0) {
               parts.push('');
               parts.push(`-- admits (${admitted.length}) ----------`);
-              admitted.forEach(a => parts.push(`  ${a.hash}  L${a.line}: ${a.goal}`));
+              admitted.forEach(a => {
+                const nGoals = a.goal ? a.goal.split(' | ').length : 1;
+                const isRootAdmitted = (docLines[a.line - 1] || '').trim() === 'Admitted.';
+                parts.push(`  ${a.hash}  L${a.line}: ${a.goal}`);
+                if (isRootAdmitted && nGoals > 1) {
+                  parts.push(`  ^ ${nGoals} focused goals — insert ${nGoals} bulleted admits (-) to address each individually, then use their hashes`);
+                }
+              });
             }
           }
 

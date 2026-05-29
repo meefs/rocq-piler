@@ -1,6 +1,6 @@
 # 🤖 rocq-piler
 
-**Neurosymbolic Programming with Rocq LSP**
+**Let rocq-piler do the heavy lifting for your proofs.**
 
 ## Overview
 

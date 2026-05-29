@@ -122,3 +122,18 @@ Proof.
   - intros T Hty; inversion Hty; subst; inversion H2; subst; assumption.
   - intros T Hty; inversion Hty; subst; inversion H2; subst; assumption.
 Qed.
+
+(* Progress: a well-typed non-value can step *)
+Theorem progress : forall t T,
+  has_type t T ->
+  value t \/ exists t', step t t'.
+Proof.
+intros t T Hty. induction Hty.
+- left; apply V_Zero.
+- destruct IHHty as [Hv | [t' Hs]]; [left; apply V_Succ; assumption | right; exists (tsucc t'); apply S_Succ; assumption].
+- left; apply V_Lit.
+- left; apply V_Nil.
+- destruct IHHty1 as [Hv1 | [hd' Hs1]]; destruct IHHty2 as [Hv2 | [tl' Hs2]]; [left; apply V_Cons; assumption | right; exists (tcons hd tl'); apply S_ConsTl; assumption | right; exists (tcons hd' tl); apply S_ConsHd; assumption | right; exists (tcons hd' tl); apply S_ConsHd; assumption].
+- destruct IHHty as [Hv | [v' Hs]]; [inversion Hv; subst; inversion Hty; subst; right; exists hd; apply S_HeadCons; assumption | right; exists (thead v'); apply S_Head; assumption].
+- destruct IHHty as [Hv | [v' Hs]]; [inversion Hv; subst; inversion Hty; subst; right; exists tl; apply S_TailCons; assumption | right; exists (ttail v'); apply S_Tail; assumption].
+Qed.

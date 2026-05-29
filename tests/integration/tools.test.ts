@@ -614,6 +614,97 @@ describe('insert_tactic admit_hash re-seal', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// deep_conj: admit → split → admit sub-bullets → close one by one
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('deep_conj admit-split-close workflow', () => {
+  // Fixture: (True /\ True) /\ True
+  //   split → bullet 1: True /\ True (admitted), bullet 2: True (admitted)
+  // Workflow:
+  //   1. list_admitted → 2 hashes
+  //   2. replace bullet 1 admit with split. → re-seals, now 3 admits total
+  //   3. close the two new sub-admits (exact I.) one by one
+  //   4. close bullet 2 admit (exact I.) → Qed
+
+  it('list_admitted finds exactly 2 admits in the initial fixture', async () => {
+    const tmpFile = tempFixture('deep_conj.v', 'dclist');
+    await h.callTool('check_file', { file: tmpFile });
+
+    const r = await h.callTool('list_admitted', { file: tmpFile, name: 'deep_conj' });
+    expect(r.isError).toBe(false);
+    const hashes = [...r.text.matchAll(/([0-9a-f]{8})\s+L/g)].map(m => m[1]);
+    expect(hashes).toHaveLength(2);
+
+    removeTempFixture(tmpFile);
+  }, TIMEOUT);
+
+  it('split. on the first admitted bullet re-seals and reports 3 remaining', async () => {
+    const tmpFile = tempFixture('deep_conj.v', 'dcsplit');
+    await h.callTool('check_file', { file: tmpFile });
+
+    const list = await h.callTool('list_admitted', { file: tmpFile, name: 'deep_conj' });
+    const firstHash = list.text.match(/[0-9a-f]{8}/)![0];
+
+    // bullet 1 goal is True /\ True — split. is non-closing, re-seals with a single admit.
+    const r = await h.callTool('insert_tactic', {
+      file: tmpFile,
+      name: 'deep_conj',
+      tactic: 'split.',
+      admit_hash: firstHash,
+    });
+    expect(r.isError).toBe(false);
+    expect(r.text).toMatch(/sealed with admit/);
+    // re-sealed admit in bullet 1 + original admit in bullet 2 = 2 remaining
+    expect(r.text).toMatch(/2 admit\(s\) remaining/);
+
+    removeTempFixture(tmpFile);
+  }, TIMEOUT);
+
+  it('closes all sub-admits one by one until Qed', async () => {
+    const tmpFile = tempFixture('deep_conj.v', 'dcclose');
+    await h.callTool('check_file', { file: tmpFile });
+
+    // Step 1: get initial admits
+    const list1 = await h.callTool('list_admitted', { file: tmpFile, name: 'deep_conj' });
+    const [hash1] = [...list1.text.matchAll(/([0-9a-f]{8})\s+L/g)].map(m => m[1]);
+
+    // Step 2: split bullet 1 → re-seals with one admit covering both subgoals + bullet 2 = 2 admits
+    const splitR = await h.callTool('insert_tactic', {
+      file: tmpFile, name: 'deep_conj', tactic: 'split.', admit_hash: hash1,
+    });
+    expect(splitR.isError).toBe(false);
+    expect(splitR.text).toMatch(/sealed with admit/);
+    const afterSplit = [...splitR.text.matchAll(/([0-9a-f]{8})\s+L/g)].map(m => m[1]);
+    expect(afterSplit).toHaveLength(2);
+
+    // Step 3: close first subgoal of split. — re-seals again for the second subgoal → 2 remaining
+    const r2 = await h.callTool('insert_tactic', {
+      file: tmpFile, name: 'deep_conj', tactic: 'exact I.', admit_hash: afterSplit[0],
+    });
+    expect(r2.isError).toBe(false);
+    expect(r2.text).toMatch(/2 admit\(s\) remaining/);
+    const after2 = [...r2.text.matchAll(/([0-9a-f]{8})\s+L/g)].map(m => m[1]);
+    expect(after2).toHaveLength(2);
+
+    // Step 4: close remaining admits (second subgoal + bullet 2 both have goal True,
+    // so same hash — exact I. closes both in one call) → Qed
+    const r3 = await h.callTool('insert_tactic', {
+      file: tmpFile, name: 'deep_conj', tactic: 'exact I.', admit_hash: after2[0],
+    });
+    expect(r3.isError).toBe(false);
+    expect(r3.text).toMatch(/Qed applied/);
+    expect(r3.text).not.toMatch(/admit\(s\) remaining/);
+
+    // File should be fully closed
+    const content = fs.readFileSync(tmpFile, 'utf8');
+    expect(content).toContain('Qed.');
+    expect(content).not.toMatch(/Admitted\./);
+
+    removeTempFixture(tmpFile);
+  }, TIMEOUT);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // search_lemmas / inspect_term / inspect_about / locate_term / require_lib
 // ─────────────────────────────────────────────────────────────────────────────
 

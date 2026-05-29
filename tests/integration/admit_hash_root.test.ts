@@ -111,3 +111,61 @@ describe('root Admitted. with multiple goals (after split.)', () => {
     expect(r.text).toMatch(/Qed applied|1 admit\(s\) remaining/);
   }, TIMEOUT);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regression: auto-Qed must NOT fire when background goals remain
+//
+// Scenario: split. → 2 goals, no tactic admits, one Admitted.
+//   - insert first bullet "- exact I." → bullet 1 closed, 1 goal in background
+//   - Admitted. still has 1 background goal
+//   - auto-Qed must NOT fire here — proof is not complete
+//   - file must still contain Admitted., not Qed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('auto-Qed must not fire with background goals remaining', () => {
+  // Each test gets its own temp file to avoid LSP state bleed between tests.
+
+  it('closing first bullet does not trigger Qed when second bullet is pending', async () => {
+    const tmpFile = tempFixture('multi_goal_admitted.v', 'autqoed1');
+    await h.callTool('check_file', { file: tmpFile });
+
+    const focus = await h.callTool('focus_proof', { file: tmpFile, name: 'multi_goal' });
+    const hash = extractAdmitHashes(focus.text)[0]?.hash;
+    expect(hash).toBeTruthy();
+
+    // Close first goal with a bullet — second goal still in background
+    const r = await h.callTool('insert_tactic', {
+      file: tmpFile, name: 'multi_goal', tactic: '- exact I.', admit_hash: hash,
+    });
+    expect(r.isError).toBe(false);
+
+    // Must NOT have auto-Qed — 1 background goal remains
+    expect(r.text).not.toMatch(/Qed applied/i);
+    const content = fs.readFileSync(tmpFile, 'utf8');
+    expect(content).toMatch(/Admitted\./);
+    expect(content).not.toMatch(/\bQed\./);
+
+    removeTempFixture(tmpFile);
+  }, TIMEOUT);
+
+  it('response message correctly reports background goal remaining, not Qed', async () => {
+    // Verifies the response text accurately reflects state — "1 in background",
+    // NOT "done — Qed applied" — when one bullet closes but another remains.
+    const tmpFile = tempFixture('multi_goal_admitted.v', 'autqoed2');
+    await h.callTool('check_file', { file: tmpFile });
+
+    const focus = await h.callTool('focus_proof', { file: tmpFile, name: 'multi_goal' });
+    const hash = extractAdmitHashes(focus.text)[0]?.hash;
+    expect(hash).toBeTruthy();
+
+    const r = await h.callTool('insert_tactic', {
+      file: tmpFile, name: 'multi_goal', tactic: '- exact I.', admit_hash: hash,
+    });
+    expect(r.isError).toBe(false);
+    // Response must indicate bullet closed with background remaining, not proof done
+    expect(r.text).not.toMatch(/Qed applied/i);
+    expect(r.text).toMatch(/background|remaining/i);
+
+    removeTempFixture(tmpFile);
+  }, TIMEOUT);
+});

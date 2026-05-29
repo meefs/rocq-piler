@@ -1519,7 +1519,11 @@ async function main() {
                     const gR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
                       st: sR.st, opts: { compact: true },
                     });
-                    hasFocusedGoals = (gR.goals?.length ?? 0) > 0;
+                    const nFocused = gR.goals?.length ?? 0;
+                    const nBg = (gR.stack || []).reduce(
+                      (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
+                    );
+                    hasFocusedGoals = nFocused > 0 || nBg > 0;
                   } catch {}
                 }
               }

@@ -1,6 +1,6 @@
 # 🤖 rocq-piler
 
-![rocq-piler](assets/gavinmendelgleason_1970s_space_art_style_depecting_a_high_tech__2f02f13a-0a49-4808-b991-cc19000d5360.png)
+![rocq-piler](assets/header.png)
 
 **Let rocq-piler do the heavy lifting for your proofs.**
 

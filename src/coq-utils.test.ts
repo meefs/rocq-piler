@@ -332,12 +332,17 @@ describe('findProofLine', () => {
     'Theorem bar : 1 = 1.',
     'Proof. Admitted.', '',
     'Lemma baz : 2 = 2.',
-    'Proof.', 'Admitted.',
+    'Proof.', 'Admitted.', '',
+    'Lemma wp_binop s E op v1 v2 Φ :',
+    '  ▷ Φ (SnakeletLang.binop_eval op v1 v2) -∗',
+    '  WP SnakeletLang.BinOp op (SnakeletLang.Val v1) (SnakeletLang.Val v2) @ s; E {{ Φ }}.',
+    'Proof.', '  exact I.', 'Qed.',
   ];
   it('finds Proof.', () => expect(findProofLine(file, 'foo')).toBe(3));
   it('finds Proof. Admitted.', () => expect(findProofLine(file, 'bar')).toBe(9));
   it('finds Proof. before Admitted', () => expect(findProofLine(file, 'baz')).toBe(12));
   it('returns -1 for missing', () => expect(findProofLine(file, 'nope')).toBe(-1));
+  it('finds lemma with parameters before colon', () => expect(findProofLine(file, 'wp_binop')).toBe(18));
 });
 
 describe('applyTextEdits', () => {

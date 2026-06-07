@@ -82,15 +82,21 @@ export function insertPosition(text: string, pos: Position): Position {
  */
 export function findProofLine(lines: string[], searchName: string): number {
   const s = searchName.trim();
+  const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i].trim();
     const kw = l.split(/\s+/)[0];
-    if ((kw === 'Lemma' || kw === 'Theorem' || kw === 'Corollary' || kw === 'Example') &&
-        l.includes(s + ' :')) {
-      for (let j = i + 1; j < lines.length; j++) {
-        const t = (lines[j] || '').trim();
-        if (t === 'Proof.' || t.startsWith('Proof. ')) return j;
-        if (isTopLevelLine(lines[j] || '') || isProofEndLine(lines[j] || '')) break;
+    if ((kw === 'Lemma' || kw === 'Theorem' || kw === 'Corollary' || kw === 'Example')) {
+      // Match the name as a whole word in the statement line — the colon
+      // may follow directly (Lemma foo :) or after parameters
+      // (Lemma foo x y :).  Also check the next line for a lone colon
+      // (multi-line statements).
+      if (l.match(new RegExp(`\\b${escaped}\\b`))) {
+        for (let j = i + 1; j < lines.length; j++) {
+          const t = (lines[j] || '').trim();
+          if (t === 'Proof.' || t.startsWith('Proof. ')) return j;
+          if (isTopLevelLine(lines[j] || '') || isProofEndLine(lines[j] || '')) break;
+        }
       }
     }
   }

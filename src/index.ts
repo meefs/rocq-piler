@@ -1065,14 +1065,21 @@ async function main() {
           const position = { line: pLine, character: 0 };
 
           const lastPoint = insertPosition(doc.text, position);
-          const goalsResult = await retryDocumentNotReady(() =>
-            lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-              textDocument: { uri: doc.uri, version: doc.version },
-              position: lastPoint,
-              pp_format: 'Str',
-              mode: 'Prev',
-            })
-          );
+          let goalsResult: GoalAnswer<string> | null = null;
+          try {
+            goalsResult = await retryDocumentNotReady(() =>
+              lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                textDocument: { uri: doc.uri, version: doc.version },
+                position: lastPoint,
+                pp_format: 'Str',
+                mode: 'Prev',
+              })
+            );
+          } catch {
+            // proof/goals can fail on Iris proofmode states or large proofs.
+            // Fall back to file-based analysis below.
+            goalsResult = null;
+          }
 
           // Extract proof script from file content (no LSP query)
           let scriptLines: string[] = [];
@@ -1080,7 +1087,7 @@ async function main() {
           const scriptEnd = insertPosition(doc.text, position);
           scriptLines = allLines.slice(position.line, scriptEnd.line);
 
-          const gc = goalsResult.goals;
+          const gc = goalsResult?.goals;
           const goals = gc?.goals || [];
           const stack = gc?.stack || [];
           const bullet = gc?.bullet;
@@ -1155,7 +1162,9 @@ async function main() {
             });
           }
 
-          const hint = nextHint(gc);
+          const hint = gc ? nextHint(gc) : (bounds && (docLines[bounds.endLine] || '').trim() === 'Qed.'
+            ? 'Proof complete. Qed auto-applied.'
+            : 'Proof state could not be queried.');
           // If there are any admits (including petanque failures like
           // "(could not query)"), the proof is not complete even if the
           // goals query returned 0.  This happens with Iris proofmode
@@ -1181,7 +1190,7 @@ async function main() {
             script: scriptLines,
             auto_removed: false,
             next: hint,
-            error: goalsResult.error || null,
+            error: goalsResult?.error || null,
           });
         }
 

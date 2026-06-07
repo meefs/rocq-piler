@@ -1156,8 +1156,17 @@ async function main() {
           }
 
           const hint = nextHint(gc);
+          // If there are any admits (including petanque failures like
+          // "(could not query)"), the proof is not complete even if the
+          // goals query returned 0.  This happens with Iris proofmode
+          // states where petanque can't snapshot but the file has real
+          // admit. lines.
+          const hasAnyAdmits = admitted.length > 0;
+          const effectiveHint = (hasAnyAdmits && hint.startsWith('Proof complete'))
+            ? `${admitted.length} admit(s) remaining.`
+            : hint;
           parts.push('');
-          parts.push(`next: ${hint}`);
+          parts.push(`next: ${effectiveHint}`);
 
           return reply(parts.join('\n'), {
             bullet,

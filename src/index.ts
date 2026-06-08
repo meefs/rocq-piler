@@ -1065,21 +1065,14 @@ async function main() {
           const position = { line: pLine, character: 0 };
 
           const lastPoint = insertPosition(doc.text, position);
-          let goalsResult: GoalAnswer<string> | null = null;
-          try {
-            goalsResult = await retryDocumentNotReady(() =>
-              lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-                textDocument: { uri: doc.uri, version: doc.version },
-                position: lastPoint,
-                pp_format: 'Str',
-                mode: 'Prev',
-              })
-            );
-          } catch {
-            // proof/goals can fail on Iris proofmode states or large proofs.
-            // Fall back to file-based analysis below.
-            goalsResult = null;
-          }
+          const goalsResult = await retryDocumentNotReady(() =>
+            lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+              textDocument: { uri: doc.uri, version: doc.version },
+              position: lastPoint,
+              pp_format: 'Str',
+              mode: 'Prev',
+            })
+          );
 
           // Extract proof script from file content (no LSP query)
           let scriptLines: string[] = [];
@@ -1319,16 +1312,16 @@ async function main() {
           // to drop stale bindings from the old file state.
           try {
             await docManager.closeDocument(file);
-            await ensureDocumentOpened(file);
-            // Poll with petanque (memo=false) at last line to force full document check.
-            // proof/goals at (0,0) returns instantly — doesn't force checking downstream.
-            const freshDoc = docManager.getDocument(file)!;
-            const lastLine = Math.max(0, freshDoc.text.split('\n').length - 1);
+            const reopened = await ensureDocumentOpened(file);
+            // Wait for coq-lsp to finish re-processing the document.
+            // Without this, subsequent proof/goals queries hit stale state
+            // and return "illegal begin of vernac" or time out.
             await retryDocumentNotReady(() =>
-              lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
-                uri: freshDoc.uri,
-                position: { line: lastLine, character: 0 },
-                opts: { memo: false, hash: false },
+              lspClient.sendRequest('coq/getDocument', {
+                textDocument: {
+                  uri: reopened.uri,
+                  version: reopened.version,
+                },
               })
             );
           } catch (e) {

@@ -41,7 +41,7 @@ async function retryDocumentNotReady<T>(
   action: () => Promise<T>,
   opts?: { timeoutMs?: number; initialDelayMs?: number; maxDelayMs?: number }
 ): Promise<T> {
-  const timeoutMs = opts?.timeoutMs ?? 30_000;
+  const timeoutMs = opts?.timeoutMs ?? 120_000;
   let delayMs = opts?.initialDelayMs ?? 50;
   const maxDelayMs = opts?.maxDelayMs ?? 500;
   const start = Date.now();

@@ -43,7 +43,59 @@ describe('check_file', () => {
     expect(r.text).toMatch(/already_proved.*Qed/);
     expect(r.text).toMatch(/trivial.*Admitted/);
   });
+
+  it('shows definitions with compact line ranges, not full body', async () => {
+    const META = fixture('check_file_meta.v');
+    const r = await h.callTool('check_file', { file: META });
+    expect(r.isError).toBe(false);
+    expect(r.text).toMatch(/Definition myNat \[L\d+-L\d+\] \[open\]/);
+    expect(r.text).toMatch(/Inductive myBool \[L\d+-L\d+\] \[open\]/);
+    expect(r.text).toMatch(/Fixpoint myAdd \[L\d+-L\d+\] \[open\]/);
+    expect(r.text).toMatch(/skipDefs : .* \S+-\S+.*Qed/);
+    expect(r.text).toMatch(/alsoSkip : .* \S+-\S+.*Qed/);
+    expect(r.text).toMatch(/admitOne .* \S+-\S+.*Admitted/);
+    expect(r.text).toMatch(/admitTwo .* \S+-\S+.*Admitted/);
+    // Must NOT contain raw definition body fragments
+    expect(r.text).not.toMatch(/myNat.*nat/);
+    expect(r.text).not.toMatch(/myTrue.*myFalse/);
+    expect(r.text).not.toMatch(/myAdd.*match n/);
+  });
+
+  it('paginates with start_line and count', async () => {
+    const META = fixture('check_file_meta.v');
+    const r = await h.callTool('check_file', { file: META, start_line: 0, count: 3 });
+    expect(r.isError).toBe(false);
+    expect(r.text).toMatch(/\[0-2\/7\]/);
+    expect(r.text).toMatch(/Definition myNat/);
+    expect(r.text).toMatch(/Inductive myBool/);
+    expect(r.text).toMatch(/Fixpoint myAdd/);
+    // Should NOT include the last lemma (position >= 3)
+    expect(r.text).not.toMatch(/admitTwo/);
+    expect(r.text).not.toMatch(/admitOne/);
+    // Must NOT contain raw definition body fragments
+    expect(r.text).not.toContain('myNat :=');
+    expect(r.text).not.toContain('myTrue');
+  });
+
+  it('pagination expands backward to include overlapping items', async () => {
+    const META = fixture('check_file_meta.v');
+    // Line 14 is right where Lemma skipDefs sits; start at L15 should include it
+    const r = await h.callTool('check_file', { file: META, start_line: 14, count: 2 });
+    expect(r.isError).toBe(false);
+    expect(r.text).toMatch(/skipDefs/);
+    expect(r.text).toMatch(/alsoSkip/);
+  });
+
+  it('no pagination when count not given', async () => {
+    const META = fixture('check_file_meta.v');
+    const r = await h.callTool('check_file', { file: META });
+    expect(r.isError).toBe(false);
+    // Should show all items at once (7 items)
+    expect(r.text).toMatch(/admitTwo/);
+  });
 });
+
+const META_FIXTURE = fixture('check_file_meta.v');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // focus_proof

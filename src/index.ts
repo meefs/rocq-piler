@@ -597,6 +597,8 @@ async function main() {
             type: 'object',
             properties: {
               file: { type: 'string' },
+              start_line: { type: 'number', description: 'Optional: 0-based start line for paginated summary' },
+              count: { type: 'number', description: 'Optional: max items to return (boundary-expanding)' },
             },
             required: ['file'],
           },
@@ -2007,7 +2009,7 @@ async function main() {
         }
 
         case 'check_file': {
-          const { file } = args as { file: string };
+          const { file, start_line, count } = args as { file: string; start_line?: number; count?: number };
 
           try {
             const doc = await ensureDocumentOpened(file);
@@ -2061,40 +2063,93 @@ async function main() {
                 (admittedGoals.length > 0 ? ` — ${admittedGoals.join(', ')}` : '')
               : '';
 
-            // Summary: scan file for toplevel names and their status
-            const items: string[] = [];
+            // Summary: scan file for toplevel names, status, and line ranges
+            const PROOF_KWS = ['Lemma', 'Theorem', 'Corollary', 'Example'];
+            const DEF_KWS = ['Definition', 'Fixpoint', 'Inductive'];
+            const ALL_KWS = [...PROOF_KWS, ...DEF_KWS];
+            const items: Array<{ text: string; startLine: number }> = [];
             for (let i = 0; i < docLines.length; i++) {
               const l = docLines[i].trim();
               const kw = l.split(/\s+/)[0];
-              if (kw === 'Lemma' || kw === 'Theorem' || kw === 'Corollary' ||
-                  kw === 'Definition' || kw === 'Fixpoint' || kw === 'Inductive' ||
-                  kw === 'Example') {
-                const namePart = l.split(':')[0].replace(kw, '').trim();
-                const colonIdx = l.indexOf(':');
-                let typeStr = '';
-                if (colonIdx >= 0) {
-                  typeStr = l.slice(colonIdx + 1).trim();
-                  // Read continuation lines (indented or non-keyword lines)
-                  for (let c = i + 1; c < docLines.length; c++) {
-                    const cl = docLines[c].trim();
-                    if (!cl || cl === 'Proof.' || cl === 'Proof. Admitted.' || cl === 'Proof. Qed.' ||
-                        cl === 'Qed.' || cl === 'Admitted.' || cl === 'Defined.' ||
-                        isTopLevelLine(docLines[c] || '')) break;
-                    typeStr += ' ' + cl;
-                  }
-                  typeStr = typeStr.replace(/\.$/, '').trim();
-                }
-                let status = '?';
+              const isDef = DEF_KWS.includes(kw);
+              const isProof = PROOF_KWS.includes(kw);
+              if (isDef || isProof) {
+                // Extract bare name: first non-keyword word before : or :=
+                const afterKw = l.slice(l.indexOf(kw) + kw.length).trim();
+                const nameMatch = afterKw.match(/^([^\s(:]+)/);
+                const namePart = nameMatch ? nameMatch[1] : afterKw.split(':')[0].replace(kw, '').trim();
+                // Find end line
+                let endLine = i;
                 for (let j = i + 1; j < docLines.length; j++) {
                   const t = docLines[j].trim();
-                  if (t === 'Qed.') { status = 'Qed'; break; }
-                  if (t === 'Admitted.') { status = 'Admitted'; break; }
-                  if (isTopLevelLine(docLines[j] || '')) { status = 'open'; break; }
+                  // Terminators
+                  if (t === 'Qed.' || t === 'Admitted.' || t === 'Defined.') { endLine = j; break; }
+                  // Inline termination (e.g. "Proof. exact I. Qed.")
+                  if (isProof && /\bQed\.\s*$/.test(t)) { endLine = j; break; }
+                  if (isProof && /\bAdmitted\.\s*$/.test(t)) { endLine = j; break; }
+                  // Next top-level: for definitions stop immediately; for proofs use guard
+                  if (isTopLevelLine(docLines[j] || '')) {
+                    if (isDef || j > i + 20) { endLine = j - 1; break; }
+                  }
+                  if (j === docLines.length - 1) { endLine = j; }
                 }
-                items.push(`${kw} ${namePart} : ${typeStr || '?'}  [${status}]`);
+                // Status discovery
+                let status = '?';
+                for (let j = i; j <= endLine; j++) {
+                  const t = docLines[j].trim();
+                  if (t === 'Qed.' || /\bQed\.\s*$/.test(t)) { status = 'Qed'; break; }
+                  if (t === 'Admitted.' || /\bAdmitted\.\s*$/.test(t)) { status = 'Admitted'; break; }
+                }
+                if (isDef && status === '?') status = 'open';
+                if (!isDef && !isProof) status = 'open';
+                const rangeStr = `L${i}-L${endLine}`;
+                let entry: string;
+                if (isDef) {
+                  entry = `${kw} ${namePart} [${rangeStr}] [${status}]`;
+                } else {
+                  const colonIdx = l.indexOf(':');
+                  let typeStr = '';
+                  if (colonIdx >= 0) {
+                    typeStr = l.slice(colonIdx + 1).trim();
+                    for (let c = i + 1; c < endLine; c++) {
+                      const cl = docLines[c].trim();
+                      if (!cl || cl === 'Proof.') break;
+                      typeStr += ' ' + cl;
+                    }
+                    typeStr = typeStr.replace(/\.$/, '').trim();
+                  }
+                  if (typeStr.length > 120) typeStr = typeStr.slice(0, 117) + '...';
+                  entry = `${kw} ${namePart} : ${typeStr || '?'} [${rangeStr}] [${status}]`;
+                }
+                items.push({ text: entry, startLine: i });
+                i = endLine;
               }
             }
-            const summary = items.length > 0 ? '\n' + items.join('\n') : '';
+
+            // Paginate with boundary expansion
+            const MAX_ITEMS = 40;
+            let startIdx = 0;
+            let endIdx = items.length;
+            let paginated = false;
+            if (start_line !== undefined && count !== undefined && count > 0) {
+              paginated = true;
+              startIdx = items.findIndex(it => it.startLine >= start_line);
+              if (startIdx < 0) startIdx = items.length;
+              while (startIdx > 0 && items[startIdx]?.startLine > start_line) startIdx--;
+              endIdx = Math.min(items.length, startIdx + count);
+            }
+            const pageItems = items.slice(startIdx, endIdx);
+            const truncated = paginated ? endIdx < items.length : items.length > MAX_ITEMS;
+
+            const summary = pageItems.length > 0
+              ? (paginated
+                  ? `\n[${startIdx}-${endIdx-1}/${items.length}]` +
+                    (truncated ? ` (more after L${items[endIdx]?.startLine ?? 0})` : '')
+                  : (items.length > MAX_ITEMS
+                      ? `\n[0-${pageItems.length-1}/${items.length}] (truncated at ${MAX_ITEMS} items)`
+                      : ''))
+                + '\n' + pageItems.map(it => it.text).join('\n')
+              : (items.length > 0 ? `\n${items.length} items total (use count parameter to paginate)` : '');
 
             return reply(
               `${fileLine(file, 0)} — ${result.completed?.status || 'unknown'}, ${spanCount} spans (${loc})` + admittedInfo + summary,

@@ -2152,8 +2152,8 @@ async function main() {
               : (items.length > 0 ? `\n${items.length} items total (use count parameter to paginate)` : '');
 
             return reply(
-              `${fileLine(file, 0)} — ${result.completed?.status || 'unknown'}, ${spanCount} spans (${loc})` + admittedInfo + summary,
-              { file, completed: result.completed?.status, span_count: spanCount, completed_range: loc, admitted: admittedCount, admitted_lines: admittedAt, success: true }
+              `${fileLine(file, 0)} — ${result.completed?.status || 'unknown'}, ${spanCount} spans (${loc}) [ws: ${activeWorkspaceRoot}]` + admittedInfo + summary,
+              { file, completed: result.completed?.status, span_count: spanCount, completed_range: loc, admitted: admittedCount, admitted_lines: admittedAt, success: true, workspace_root: activeWorkspaceRoot }
             );
           } catch (error) {
             return err(

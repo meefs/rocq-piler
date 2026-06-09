@@ -41,7 +41,7 @@ async function retryDocumentNotReady<T>(
   action: () => Promise<T>,
   opts?: { timeoutMs?: number; initialDelayMs?: number; maxDelayMs?: number }
 ): Promise<T> {
-  const timeoutMs = opts?.timeoutMs ?? 120_000;
+  const timeoutMs = opts?.timeoutMs ?? 30_000;
   let delayMs = opts?.initialDelayMs ?? 50;
   const maxDelayMs = opts?.maxDelayMs ?? 500;
   const start = Date.now();
@@ -599,6 +599,7 @@ async function main() {
               file: { type: 'string' },
               start_line: { type: 'number', description: 'Optional: 0-based start line for paginated summary' },
               count: { type: 'number', description: 'Optional: max items to return (boundary-expanding)' },
+              timeout_ms: { type: 'number', description: 'Optional: timeout in ms for LSP requests (default 15000)' },
             },
             required: ['file'],
           },
@@ -2009,10 +2010,11 @@ async function main() {
         }
 
         case 'check_file': {
-          const { file, start_line, count } = args as { file: string; start_line?: number; count?: number };
+          const { file, start_line, count, timeout_ms } = args as { file: string; start_line?: number; count?: number; timeout_ms?: number };
 
           try {
             const doc = await ensureDocumentOpened(file);
+            const reqTimeout = timeout_ms ?? 15000;
 
             const result = await retryDocumentNotReady(() =>
               lspClient.sendRequest<{
@@ -2025,7 +2027,7 @@ async function main() {
                 },
                 ast: false,
                 goals: 'Str',
-              })
+              }, reqTimeout)
             );
 
             const spanCount = result.spans?.length || 0;
@@ -2049,7 +2051,7 @@ async function main() {
                     position: { line, character: 0 },
                     pp_format: 'Str',
                     mode: 'Prev',
-                  })
+                  }, reqTimeout)
                 );
                 const nG = gResult.goals?.goals?.length || 0;
                 if (nG > 0) {

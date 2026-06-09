@@ -230,7 +230,7 @@ export class RocqLspClient {
   /**
    * Wait until the LSP connection is ready (connection established)
    */
-  async waitUntilReady(timeoutMs: number = 120000): Promise<void> {
+  async waitUntilReady(timeoutMs: number = 30000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let logged = false;
     while (!this.ready) {
@@ -250,7 +250,7 @@ export class RocqLspClient {
   /**
    * Send a JSON-RPC request to rocq-lsp
    */
-  async sendRequest<T>(method: string, params: unknown, timeoutMs = 120000): Promise<T> {
+  async sendRequest<T>(method: string, params: unknown, timeoutMs = 15000): Promise<T> {
     if (!this.ready || !this.connection) {
       throw new Error('LSP client not started');
     }

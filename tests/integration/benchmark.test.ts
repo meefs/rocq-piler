@@ -23,12 +23,13 @@ beforeAll(async () => {
   h = await createHarness();
 
   // Pre-warm the examples workspace (cold LSP start with Stdlib)
-  console.log('[bench] warming examples workspace...');
+  console.log('[bench] measuring cold start...');
   const t0 = Date.now();
   const warm = await h.callTool('check_file',
-    { file: PCF_REF, timeout_ms: 90000 }, TIMEOUT);
+    { file: PCF_REF, timeout_ms: 120000, retry_timeout_ms: 180000 }, TIMEOUT);
   timings['pcf_ref.v COLD'] = Date.now() - t0;
-  if (warm.isError) console.log('[bench] warmup error:', warm.text);
+  if (warm.isError) console.log('[bench] COLD error:', warm.text.slice(0, 200));
+  else console.log('[bench] COLD complete:', warm.text.slice(0, 120));
 
   // Also warm the fixtures workspace (already done by basic.v)
 }, TIMEOUT);
@@ -59,13 +60,15 @@ describe('benchmark: check_file on real files', () => {
     expect(r.text).toMatch(/preservation.*Qed/);
   }, TIMEOUT);
 
-  it('SnakeletWp.v warm', async () => {
+  it('SnakeletWp.v warm (22 lemmas, all Qed)', async () => {
     const t0 = Date.now();
     const r = await h.callTool('check_file',
       { file: SWP, timeout_ms: 30000 }, TIMEOUT);
-    timings['SnakeletWp.v (55L) warm'] = Date.now() - t0;
+    timings['SnakeletWp.v (405L) warm'] = Date.now() - t0;
     expect(r.isError).toBe(false);
-    expect(r.text).toMatch(/wp_binop/);
-    expect(r.text).toMatch(/Admitted/);
+    // All 22 lemmas must be Qed, no admits
+    expect(r.text).not.toMatch(/Admitted/);
+    expect(r.text).toMatch(/wp_alloc.*Qed/);
+    expect(r.text).toMatch(/wp_binop.*Qed/);
   }, TIMEOUT);
 });

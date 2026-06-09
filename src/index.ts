@@ -599,7 +599,8 @@ async function main() {
               file: { type: 'string' },
               start_line: { type: 'number', description: 'Optional: 0-based start line for paginated summary' },
               count: { type: 'number', description: 'Optional: max items to return (boundary-expanding)' },
-              timeout_ms: { type: 'number', description: 'Optional: timeout in ms for LSP requests (default 15000)' },
+              timeout_ms: { type: 'number', description: 'Optional: per-request timeout in ms (default 15000)' },
+              retry_timeout_ms: { type: 'number', description: 'Optional: total retry timeout in ms for cold starts (default 30000)' },
             },
             required: ['file'],
           },
@@ -2010,11 +2011,12 @@ async function main() {
         }
 
         case 'check_file': {
-          const { file, start_line, count, timeout_ms } = args as { file: string; start_line?: number; count?: number; timeout_ms?: number };
+          const { file, start_line, count, timeout_ms, retry_timeout_ms } = args as { file: string; start_line?: number; count?: number; timeout_ms?: number; retry_timeout_ms?: number };
 
           try {
             const doc = await ensureDocumentOpened(file);
             const reqTimeout = timeout_ms ?? 15000;
+            const retryOpts = retry_timeout_ms !== undefined ? { timeoutMs: retry_timeout_ms } : undefined;
 
             const result = await retryDocumentNotReady(() =>
               lspClient.sendRequest<{
@@ -2027,7 +2029,8 @@ async function main() {
                 },
                 ast: false,
                 goals: 'Str',
-              }, reqTimeout)
+              }, reqTimeout),
+              retryOpts
             );
 
             const spanCount = result.spans?.length || 0;
@@ -2051,7 +2054,8 @@ async function main() {
                     position: { line, character: 0 },
                     pp_format: 'Str',
                     mode: 'Prev',
-                  }, reqTimeout)
+                  }, reqTimeout),
+                  retryOpts
                 );
                 const nG = gResult.goals?.goals?.length || 0;
                 if (nG > 0) {

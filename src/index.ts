@@ -1069,14 +1069,46 @@ async function main() {
           const position = { line: pLine, character: 0 };
 
           const lastPoint = insertPosition(doc.text, position);
-          const goalsResult = await retryDocumentNotReady(() =>
-            lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+
+          // Query goals — try proof/goals first (standard Coq), fall back to petanque (Iris proofmode)
+          let goalsResult: GoalAnswer<string> | null = null;
+          let usePetanque = false;
+          try {
+            goalsResult = await retryDocumentNotReady(() =>
+              lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                textDocument: { uri: doc.uri, version: doc.version },
+                position: lastPoint,
+                pp_format: 'Str',
+                mode: 'Prev',
+              })
+            );
+            // proof/goals may succeed but return empty/null for Iris proofmode
+            if (!goalsResult?.goals?.goals && !goalsResult?.goals?.stack?.length) {
+              usePetanque = true;
+            }
+          } catch {
+            usePetanque = true;
+          }
+
+          if (usePetanque) {
+            // Fall back to petanque — works for Iris proofmode
+            const stateR = await retryDocumentNotReady(() =>
+              lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                uri: doc.uri, position: lastPoint, opts: { memo: false },
+              })
+            );
+            const petGoalsR = await lspClient.sendRequest<any>('petanque/goals', {
+              st: stateR.st, opts: { compact: false },
+            });
+            // Wrap in a GoalAnswer-shaped object for formatGoals
+            const pg = petGoalsR?.goals ?? [];
+            goalsResult = {
               textDocument: { uri: doc.uri, version: doc.version },
               position: lastPoint,
-              pp_format: 'Str',
-              mode: 'Prev',
-            })
-          );
+              messages: [],
+              goals: { goals: pg, stack: [], bullet: undefined, shelf: [], given_up: [] },
+            };
+          }
 
           // Extract proof script from file content (no LSP query)
           let scriptLines: string[] = [];
@@ -1094,6 +1126,9 @@ async function main() {
           // Format proof tree as text
           const parts: string[] = [];
           parts.push(`${fileLine(file, position.line)}`);
+
+          // Petanque fallback indicator
+          if (usePetanque) parts.push('  (via petanque)');
 
           // Bullet level
           if (bullet) parts.push(`  bullet: ${bullet}`);

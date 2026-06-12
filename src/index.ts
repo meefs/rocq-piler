@@ -2739,8 +2739,8 @@ async function main() {
           const survivors: number[] = [];
           const bodyLines: string[] = ['  ' + skel];
           for (let i = 0; i < nGoals; i++) {
-            if (wins[i] !== null) bodyLines.push(`  - (* ${nameOf(i)} *) solve [ ${entries[wins[i]!]} ].`);
-            else { survivors.push(i); bodyLines.push(`  - (* ${nameOf(i)} *) admit.`); }
+            if (wins[i] !== null) bodyLines.push(`  { (* ${nameOf(i)} *) solve [ ${entries[wins[i]!]} ]. }`);
+            else { survivors.push(i); bodyLines.push(`  { (* ${nameOf(i)} *) admit. }`); }
           }
 
           let written = false;

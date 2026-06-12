@@ -2683,7 +2683,9 @@ async function main() {
           const docLines = doc.text.split('\n');
           const bounds = proofBounds(docLines, name);
           if (!bounds) throw new Error(`Proof not found or unterminated: "${name}"`);
-          const pos = insertPosition(doc.text, { line: bounds.proofLine, character: 0 });
+          // Use admitSnapPosition — snaps just before Admitted., inside proof mode.
+          const { snapLine, snapChar } = admitSnapPosition(docLines, bounds.endLine, bounds.proofLine);
+          const pos = { line: snapLine, character: snapChar };
           const uri = doc.uri;
 
           const baseState = await retryDocumentNotReady(() =>

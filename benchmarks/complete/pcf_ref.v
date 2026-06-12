@@ -174,4 +174,5 @@ Theorem preservation :
       extends S' S /\
       heap_ok mu' S' /\
       has_type [] S' t' T.
-Proof. Admitted.
+Proof.
+Admitted.

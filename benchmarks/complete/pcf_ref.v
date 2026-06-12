@@ -116,13 +116,11 @@ Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
 
 Lemma extends_refl : forall ST : store_ty, extends ST ST.
 Proof.
-intros ST; unfold extends; exists []; symmetry; apply app_nil_r.
-Qed.
+Admitted.
 
 Lemma extends_nth_error : forall (ST' ST : store_ty) l T, extends ST' ST -> nth_error ST l = Some T -> nth_error ST' l = Some T.
 Proof.
-intros ST' ST l T [S2 ->] H; rewrite nth_error_app1; [exact H|apply nth_error_Some; congruence].
-Qed.
+Admitted.
 
 Lemma has_type_extends : forall G ST t T, has_type G ST t T -> forall ST', extends ST' ST -> has_type G ST' t T.
 Proof.
@@ -150,19 +148,7 @@ Admitted.
 
 Lemma heap_update_ok : forall mu ST, heap_ok mu ST -> forall l v T, nth_error ST l = Some T -> has_type [] ST v T -> heap_ok (heap_update l v mu) ST.
 Proof.
-intros mu ST Hok l v Ty Hnth Htype.
-Proof.
-  intros mu ST Hok.
-  induction Hok; simpl; intros l v Ty Hnth Htype.
-  - apply heap_empty.
-  - destruct (Nat.eqb_spec l l0) as [Heq|Hneq]; subst.
-    + rewrite H0 in Hnth. injection Hnth. intro. subst Ty.
-      apply (heap_cons _ _ _ _ _ T); [exact H1|exact Htype|exact H0].
-    + apply (heap_cons l0 v0 (heap_update l v mu) S T).
-      * apply IHHok; auto.
-      * exact H.
-      * exact H0.
-Qed.
+Admitted.
 
 Theorem preservation :
   forall t mu t' mu' T S,
@@ -175,26 +161,26 @@ Theorem preservation :
       heap_ok mu' S' /\
       has_type [] S' t' T.
   intros t mu t' mu' T S Ht Hstep Hok Hlen; revert T S Ht Hok Hlen; induction Hstep; intros Ty STy Ht Hok Hlen; inversion Ht; subst; clear Ht.
-  - (* S_Succ *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_PredZero *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ].
-  - (* S_PredSucc *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ].
-  - (* S_Pred *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_IsZeroZero *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ].
-  - (* S_IsZeroSucc *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ].
-  - (* S_IsZero *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_IfTrue *) solve [ exists STy; split; [apply extends_refl|split; [assumption|assumption]] ].
-  - (* S_IfFalse *) solve [ exists STy; split; [apply extends_refl|split; [assumption|assumption]] ].
-  - (* S_If *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_App1 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_App2 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_AppAbs *) admit.
-  - (* S_Fix *) admit.
-  - (* S_Ref *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_RefV *) admit.
-  - (* S_Deref *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_DerefLoc *) admit.
-  - (* S_Assign1 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_Assign2 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ].
-  - (* S_AssignV *) admit.
+  { (* S_Succ *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_PredZero *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ]. }
+  { (* S_PredSucc *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ]. }
+  { (* S_Pred *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_IsZeroZero *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ]. }
+  { (* S_IsZeroSucc *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ]. }
+  { (* S_IsZero *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_IfTrue *) solve [ exists STy; split; [apply extends_refl|split; [assumption|assumption]] ]. }
+  { (* S_IfFalse *) solve [ exists STy; split; [apply extends_refl|split; [assumption|assumption]] ]. }
+  { (* S_If *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_App1 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_App2 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_AppAbs *) admit. }
+  { (* S_Fix *) admit. }
+  { (* S_Ref *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_RefV *) admit. }
+  { (* S_Deref *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_DerefLoc *) admit. }
+  { (* S_Assign1 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_Assign2 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
+  { (* S_AssignV *) admit. }
 Proof.
 Admitted.

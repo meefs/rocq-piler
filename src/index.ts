@@ -2746,7 +2746,13 @@ async function main() {
           let written = false;
           if (write !== false) {
             pushFileHistory(file, doc.text, currentProof.get(file));
-            const newText = docManager.applyEdits(doc.text, [{ range: { start: { line: pos.line, character: 0 }, end: { line: pos.line, character: 0 } }, newText: bodyLines.join('\n') + '\n' }]);
+            // Replace the proof body: from just after Proof. to just before Admitted.
+            const bodyStart = bounds.proofLine + 1;
+            const bodyEnd = bounds.endLine;
+            const newText = docManager.applyEdits(doc.text, [{
+              range: { start: { line: bodyStart, character: 0 }, end: { line: bodyEnd, character: 0 } },
+              newText: bodyLines.join('\n') + '\n',
+            }]);
             await docManager.updateDocument(file, newText);
             await docManager.saveDocument(file);
             written = true;

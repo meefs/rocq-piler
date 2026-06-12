@@ -2701,6 +2701,15 @@ async function main() {
           const goals = skelGoals.goals || [];
           const nGoals = goals.length;
 
+          // Compute goal hashes — same MD5 as queryAdmitHashes.
+          // Embedded in { (* Name:hash *) admit. } so consumers can
+          // identify which admits correspond to which re-runnable goals.
+          const { createHash } = await import('crypto');
+          const goalHashes = goals.map(g => {
+            const ty = ((g as any)?.ty || '').replace(/\s+/g, ' ');
+            return createHash('md5').update(ty).digest('hex').slice(0, 8);
+          });
+
           // Constructor names for labels (best-effort)
           let caseNames: string[] = [];
           if (cases_from) {
@@ -2739,8 +2748,8 @@ async function main() {
           const survivors: number[] = [];
           const bodyLines: string[] = ['  ' + skel];
           for (let i = 0; i < nGoals; i++) {
-            if (wins[i] !== null) bodyLines.push(`  { (* ${nameOf(i)} *) solve [ ${entries[wins[i]!]} ]. }`);
-            else { survivors.push(i); bodyLines.push(`  { (* ${nameOf(i)} *) admit. }`); }
+            if (wins[i] !== null) bodyLines.push(`  { (* ${nameOf(i)}:${goalHashes[i]} *) solve [ ${entries[wins[i]!]} ]. }`);
+            else { survivors.push(i); bodyLines.push(`  { (* ${nameOf(i)}:${goalHashes[i]} *) admit. }`); }
           }
 
           let written = false;

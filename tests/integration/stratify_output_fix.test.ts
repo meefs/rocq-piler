@@ -42,6 +42,11 @@ describe('stratify output fixes', () => {
     const admittedCount = presLines.filter(l => /^\s*Admitted\.\s*$/.test(l.trim())).length;
     expect(proofCount).toBeLessThanOrEqual(1);
     expect(admittedCount).toBeLessThanOrEqual(1);
+    // Each { admit. } must carry an 8-char hex hash in the label
+    const admitLines = presLines.filter(l => /admit\.\s*\}\s*$/.test(l.trim()));
+    for (const line of admitLines) {
+      expect(line).toMatch(/:[0-9a-f]{8}/);
+    }
     removeTempFixture(tmpFile);
   }, TIMEOUT);
 

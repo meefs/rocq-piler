@@ -601,7 +601,10 @@ async function main() {
             'inlined as a bullet; survivors become labelled, hash-addressable ' +
             '"- (* CaseName *) admit." bullets. With cases_from=<inductive name>, ' +
             'subgoals are labelled by constructor. Report is conclusion-only per ' +
-            'survivor. Follow up per survivor with insert_tactic admit_hash=<hash>. ' +
+            'survivor (with its hash). Follow up per survivor with insert_tactic ' +
+            'admit_hash=<hash>, or stratify again with admit_hash=<hash> to run a ' +
+            'nested skeleton+portfolio inside that survivor (two-level case ' +
+            'elimination, e.g. induction then inversion). ' +
             'Use write=false for a dry run.',
           inputSchema: {
             type: 'object',
@@ -620,6 +623,10 @@ async function main() {
               cases_from: {
                 type: 'string',
                 description: 'Optional: name of the inductive the skeleton case-splits on (e.g. "step") — labels subgoals by constructor',
+              },
+              admit_hash: {
+                type: 'string',
+                description: 'Optional: hash of a surviving admit (from a previous stratify or focus_proof) — runs the skeleton+portfolio nested inside that admit block instead of replacing the whole proof body',
               },
               write: { type: 'boolean', description: 'Write results into the file (default true). false = dry-run report only.' },
               attempt_timeout_ms: { type: 'number', description: 'Timeout per portfolio attempt in ms (default 10000)' },
@@ -2668,9 +2675,10 @@ async function main() {
         }
 
         case 'stratify': {
-          const { file, name, skeleton, portfolio, cases_from, write, attempt_timeout_ms } = args as {
+          const { file, name, skeleton, portfolio, cases_from, write, attempt_timeout_ms, admit_hash } = args as {
             file: string; name: string; skeleton: string; portfolio: string[];
             cases_from?: string; write?: boolean; attempt_timeout_ms?: number;
+            admit_hash?: string;
           };
           currentProof.set(file, name);
           const attemptTimeout = attempt_timeout_ms ?? 10_000;
@@ -2683,8 +2691,21 @@ async function main() {
           const docLines = doc.text.split('\n');
           const bounds = proofBounds(docLines, name);
           if (!bounds) throw new Error(`Proof not found or unterminated: "${name}"`);
-          // Use admitSnapPosition — snaps just before Admitted., inside proof mode.
-          const { snapLine, snapChar } = admitSnapPosition(docLines, bounds.endLine, bounds.proofLine);
+          // Nested mode: locate the surviving admit by hash and stratify inside it.
+          let targetAdmitLine = -1;
+          if (admit_hash) {
+            const admits = await queryAdmitHashes(doc, docLines, bounds);
+            const match = admits.find(a => a.hash === admit_hash);
+            if (!match) {
+              const known = admits.map(a => a.hash).join(', ');
+              return err(`stratify ${name}: no admit found with hash "${admit_hash}" (known: ${known || 'none'})`);
+            }
+            targetAdmitLine = match.line - 1; // queryAdmitHashes lines are 1-based
+          }
+          // Use admitSnapPosition — snaps just before the target admit (nested
+          // mode) or just before Admitted. (whole-proof mode), inside proof mode.
+          const { snapLine, snapChar } = admitSnapPosition(
+            docLines, admit_hash ? targetAdmitLine : bounds.endLine, bounds.proofLine);
           const pos = { line: snapLine, character: snapChar };
           const uri = doc.uri;
 
@@ -2746,20 +2767,45 @@ async function main() {
 
           // Materialize
           const survivors: number[] = [];
-          const bodyLines: string[] = ['  ' + skel];
-          for (let i = 0; i < nGoals; i++) {
-            if (wins[i] !== null) bodyLines.push(`  { (* ${nameOf(i)}:${goalHashes[i]} *) solve [ ${entries[wins[i]!]} ]. }`);
-            else { survivors.push(i); bodyLines.push(`  { (* ${nameOf(i)}:${goalHashes[i]} *) admit. }`); }
+          const bodyLines: string[] = [];
+          let editRange: { start: Position; end: Position };
+          if (admit_hash) {
+            // Nested mode: replace the single "{ (* Label:hash *) admit. }" line
+            // with the skeleton followed by one nested block per subgoal.
+            const lineText = docLines[targetAdmitLine] || '';
+            const m = lineText.match(/^(\s*)(.*?)\badmit\.\s*(\})?\s*$/);
+            const indent = m ? m[1] : '';
+            const pre = m ? m[2] : '';
+            const hasClose = !!(m && m[3]);
+            const sub = indent + '  ';
+            bodyLines.push(`${indent}${pre}${skel}`);
+            for (let i = 0; i < nGoals; i++) {
+              if (wins[i] !== null) bodyLines.push(`${sub}{ (* ${nameOf(i)}:${goalHashes[i]} *) solve [ ${entries[wins[i]!]} ]. }`);
+              else { survivors.push(i); bodyLines.push(`${sub}{ (* ${nameOf(i)}:${goalHashes[i]} *) admit. }`); }
+            }
+            if (hasClose) bodyLines.push(`${indent}}`);
+            editRange = {
+              start: { line: targetAdmitLine, character: 0 },
+              end: { line: targetAdmitLine + 1, character: 0 },
+            };
+          } else {
+            // Whole-proof mode: replace the body from after Proof. to Admitted.
+            bodyLines.push('  ' + skel);
+            for (let i = 0; i < nGoals; i++) {
+              if (wins[i] !== null) bodyLines.push(`  { (* ${nameOf(i)}:${goalHashes[i]} *) solve [ ${entries[wins[i]!]} ]. }`);
+              else { survivors.push(i); bodyLines.push(`  { (* ${nameOf(i)}:${goalHashes[i]} *) admit. }`); }
+            }
+            editRange = {
+              start: { line: bounds.proofLine + 1, character: 0 },
+              end: { line: bounds.endLine, character: 0 },
+            };
           }
 
           let written = false;
           if (write !== false) {
             pushFileHistory(file, doc.text, currentProof.get(file));
-            // Replace the proof body: from just after Proof. to just before Admitted.
-            const bodyStart = bounds.proofLine + 1;
-            const bodyEnd = bounds.endLine;
             const newText = docManager.applyEdits(doc.text, [{
-              range: { start: { line: bodyStart, character: 0 }, end: { line: bodyEnd, character: 0 } },
+              range: editRange,
               newText: bodyLines.join('\n') + '\n',
             }]);
             await docManager.updateDocument(file, newText);
@@ -2776,15 +2822,20 @@ async function main() {
 
           const nSolved = nGoals - survivors.length;
           const parts: string[] = [];
-          parts.push(`stratify ${name}: skeleton → ${nGoals} goal(s)${cases_from ? ` (cases from ${cases_from})` : ''}, solved ${nSolved}/${nGoals}`);
+          const scope = admit_hash ? ` (nested in ${admit_hash})` : '';
+          parts.push(`stratify ${name}${scope}: skeleton → ${nGoals} goal(s)${cases_from ? ` (cases from ${cases_from})` : ''}, solved ${nSolved}/${nGoals}`);
           for (let j = 0; j < survivors.length; j++) {
             const i = survivors[j];
             const ty = ((goals[i] as any)?.ty || '').replace(/\s+/g, ' ').slice(0, 200);
-            parts.push(`  survivor: ${nameOf(i)} ⊢ ${ty}`);
+            parts.push(`  survivor: ${nameOf(i)}:${goalHashes[i]} ⊢ ${ty}`);
           }
-          if (survivors.length === 0 && written) parts.push('all cases closed — Qed applied');
-          else if (survivors.length > 0) parts.push('next: insert_tactic with admit_hash per survivor, or edit manually');
-          return reply(parts.join('\n'), { written, solved: nSolved, total: nGoals, survivors: survivors.map(i => nameOf(i)) });
+          if (survivors.length === 0 && written) {
+            const cd = docManager.getDocument(file);
+            const closed = cd ? findTacticAdmitLines(cd.text.split('\n'), bounds.proofLine, proofBounds(cd.text.split('\n'), name)?.endLine ?? bounds.endLine).length === 0 : false;
+            parts.push(closed ? 'all cases closed — Qed applied' : 'all nested cases closed — other admits remain in proof');
+          }
+          else if (survivors.length > 0) parts.push('next: stratify admit_hash=<hash> for nested case-elimination, or insert_tactic admit_hash=<hash> per survivor');
+          return reply(parts.join('\n'), { written, solved: nSolved, total: nGoals, survivors: survivors.map(i => ({ name: nameOf(i), hash: goalHashes[i] })) });
         }
 
         case 'require_lib': {

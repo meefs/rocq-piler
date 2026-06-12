@@ -116,52 +116,151 @@ Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
 
 Lemma extends_refl : forall ST : store_ty, extends ST ST.
 Proof.
-intros ST; unfold extends; exists []; symmetry; apply app_nil_r.
+  intros ST. unfold extends. exists []. apply app_nil_r.
 Qed.
 
 Lemma extends_nth_error : forall (ST' ST : store_ty) l T, extends ST' ST -> nth_error ST l = Some T -> nth_error ST' l = Some T.
 Proof.
-intros ST' ST l T [S2 ->] H; rewrite nth_error_app1; [exact H|apply nth_error_Some; congruence].
+  intros ST' ST l T [S2 ->] H.
+  apply nth_error_app1.
+  apply nth_error_Some. congruence.
 Qed.
 
 Lemma has_type_extends : forall G ST t T, has_type G ST t T -> forall ST', extends ST' ST -> has_type G ST' t T.
 Proof.
-Admitted.
+  induction 1; intros ST' Hext.
+  - apply T_Var. assumption.
+  - apply T_Num.
+  - apply T_Bool.
+  - apply T_Succ. apply IHhas_type. assumption.
+  - apply T_Pred. apply IHhas_type. assumption.
+  - apply T_IsZero. apply IHhas_type. assumption.
+  - apply T_If; [apply IHhas_type1|apply IHhas_type2|apply IHhas_type3]; assumption.
+  - apply T_Lam. apply IHhas_type. assumption.
+  - apply T_App; [apply IHhas_type1|apply IHhas_type2]; assumption.
+  - apply T_Fix. apply IHhas_type. assumption.
+  - apply T_Ref. apply IHhas_type. assumption.
+  - apply T_Deref. apply IHhas_type. assumption.
+  - apply T_Assign; [apply IHhas_type1|apply IHhas_type2]; assumption.
+  - apply T_Loc. eapply extends_nth_error; eauto.
+Qed.
 
 Lemma heap_ok_extends : forall mu ST, heap_ok mu ST -> forall ST', extends ST' ST -> heap_ok mu ST'.
 Proof.
-Admitted.
+  induction 1; intros ST' Hext.
+  - apply heap_empty.
+  - apply heap_cons; auto.
+    + apply IHheap_ok. assumption.
+    + eapply has_type_extends; eauto.
+    + eapply extends_nth_error; eauto.
+Qed.
 
 Lemma shift_at_preserves : forall G ST t T, has_type G ST t T -> forall G1 U G2, G = G1 ++ G2 -> has_type (G1 ++ U :: G2) ST (shift_at (length G1) t) T.
 Proof.
-Admitted.
+  induction 1; intros G1 U G2 HG; subst G; simpl.
+  - (* T_Var *)
+    rename H into Hnth.
+    destruct (Nat.ltb_spec x (length G1)) as [Hlt|Hge].
+    + apply T_Var.
+      apply nth_error_app1 in Hnth; [|exact Hlt].
+      rewrite nth_error_app1; [exact Hnth|exact Hlt].
+    + apply T_Var.
+      apply nth_error_app2 in Hnth; [|lia].
+      rewrite nth_error_app2; [|lia].
+      rewrite app_length. simpl.
+      replace (x + 1 - (length G1 + 1)) with (x - length G1) by lia.
+      exact Hnth.
+  - apply T_Num.
+  - apply T_Bool.
+  - apply T_Succ. apply IHhas_type with (G1 := G1) (U := U) (G2 := G2). reflexivity.
+  - apply T_Pred. apply IHhas_type with (G1 := G1) (U := U) (G2 := G2). reflexivity.
+  - apply T_IsZero. apply IHhas_type with (G1 := G1) (U := U) (G2 := G2). reflexivity.
+  - apply T_If; [apply IHhas_type1|apply IHhas_type2|apply IHhas_type3]; instantiate (1 := G1); instantiate (1 := U); instantiate (1 := G2); reflexivity.
+  - (* T_Lam *)
+    apply T_Lam.
+    apply IHhas_type with (G1 := T1 :: G1) (U := U) (G2 := G2).
+    simpl. reflexivity.
+  - apply T_App; [apply IHhas_type1|apply IHhas_type2]; instantiate (1 := G1); instantiate (1 := U); instantiate (1 := G2); reflexivity.
+  - (* T_Fix *)
+    apply T_Fix.
+    apply IHhas_type with (G1 := T :: G1) (U := U) (G2 := G2).
+    simpl. reflexivity.
+  - apply T_Ref. apply IHhas_type with (G1 := G1) (U := U) (G2 := G2). reflexivity.
+  - apply T_Deref. apply IHhas_type with (G1 := G1) (U := U) (G2 := G2). reflexivity.
+  - apply T_Assign; [apply IHhas_type1|apply IHhas_type2]; instantiate (1 := G1); instantiate (1 := U); instantiate (1 := G2); reflexivity.
+  - (* T_Loc *) apply T_Loc. assumption.
+Qed.
 
 Lemma shift_preserves : forall G ST t T U, has_type G ST t T -> has_type (U :: G) ST (shift t) T.
 Proof.
-Admitted.
+  intros G ST t T U H.
+  unfold shift.
+  apply (shift_at_preserves _ _ _ _ H [] U G).
+  reflexivity.
+Qed.
 
 Lemma subst_preserves : forall G' ST t T, has_type G' ST t T -> forall G1 U v, G' = G1 ++ [U] -> has_type G1 ST v U -> has_type G1 ST (subst (length G1) v t) T.
 Proof.
-Admitted.
+  induction 1; intros G1 U v HG Hv; subst G'; simpl.
+  - (* T_Var *)
+    rename H into Hnth.
+    destruct (Nat.eqb_spec x (length G1)) as [Heq|Hneq].
+    + subst x. simpl. exact Hv.
+    + simpl.
+      apply T_Var.
+      destruct (Nat.ltb_spec x (length G1)) as [Hlt|Hge].
+      * apply nth_error_app1 in Hnth; [exact Hnth|exact Hlt].
+      * apply nth_error_app2 in Hnth; [|lia].
+        exfalso.
+        apply Hneq. lia.
+  - apply T_Num.
+  - apply T_Bool.
+  - apply T_Succ. apply IHhas_type with (G1 := G1) (U := U) (v := v); auto.
+  - apply T_Pred. apply IHhas_type with (G1 := G1) (U := U) (v := v); auto.
+  - apply T_IsZero. apply IHhas_type with (G1 := G1) (U := U) (v := v); auto.
+  - apply T_If; [apply IHhas_type1|apply IHhas_type2|apply IHhas_type3]; auto.
+  - (* T_Lam *)
+    apply T_Lam.
+    apply IHhas_type with (G1 := T1 :: G1) (U := U) (v := shift v).
+    + simpl. reflexivity.
+    + apply shift_preserves with (U := T1). exact Hv.
+  - apply T_App; [apply IHhas_type1|apply IHhas_type2]; auto.
+  - (* T_Fix *)
+    apply T_Fix.
+    apply IHhas_type with (G1 := T :: G1) (U := U) (v := shift v).
+    + simpl. reflexivity.
+    + apply shift_preserves with (U := T). exact Hv.
+  - apply T_Ref. apply IHhas_type with (G1 := G1) (U := U) (v := v); auto.
+  - apply T_Deref. apply IHhas_type with (G1 := G1) (U := U) (v := v); auto.
+  - apply T_Assign; [apply IHhas_type1|apply IHhas_type2]; auto.
+  - (* T_Loc *) apply T_Loc. assumption.
+Qed.
 
 Lemma heap_lookup_type : forall mu ST, heap_ok mu ST -> forall l v T, heap_lookup l mu = Some v -> nth_error ST l = Some T -> has_type [] ST v T.
 Proof.
-Admitted.
+  induction 1; intros l' v' T Hlook Hnth; simpl in *.
+  - discriminate.
+  - destruct (Nat.eqb l' l) eqn:Heq.
+    + apply Nat.eqb_eq in Heq. subst l'.
+      inversion Hlook. subst v'.
+      rewrite H1 in Hnth. inversion Hnth. subst T0.
+      exact H0.
+    + apply IHheap_ok; auto.
+      apply Nat.eqb_neq in Heq.
+      rewrite Heq in Hlook. exact Hlook.
+Qed.
 
 Lemma heap_update_ok : forall mu ST, heap_ok mu ST -> forall l v T, nth_error ST l = Some T -> has_type [] ST v T -> heap_ok (heap_update l v mu) ST.
 Proof.
-intros mu ST Hok l v Ty Hnth Htype.
-Proof.
-  intros mu ST Hok.
-  induction Hok; simpl; intros l v Ty Hnth Htype.
+  induction 1; intros l' v' T Hnth Htype; simpl.
   - apply heap_empty.
-  - destruct (Nat.eqb_spec l l0) as [Heq|Hneq]; subst.
-    + rewrite H0 in Hnth. injection Hnth. intro. subst Ty.
-      apply (heap_cons _ _ _ _ _ T); [exact H1|exact Htype|exact H0].
-    + apply (heap_cons l0 v0 (heap_update l v mu) S T).
-      * apply IHHok; auto.
-      * exact H.
-      * exact H0.
+  - destruct (Nat.eqb l l') eqn:Heq.
+    + apply Nat.eqb_eq in Heq. subst l'.
+      rewrite H1 in Hnth. inversion Hnth. subst T0.
+      apply heap_cons; auto.
+    + apply Nat.eqb_neq in Heq.
+      apply heap_cons; auto.
+      apply IHheap_ok; auto.
 Qed.
 
 Theorem preservation :
@@ -174,4 +273,6 @@ Theorem preservation :
       extends S' S /\
       heap_ok mu' S' /\
       has_type [] S' t' T.
-Proof. Admitted.
+Proof.
+  intros t mu t' mu' T S Ht Hstep Hok Hlen.
+Admitted.

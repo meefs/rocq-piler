@@ -115,118 +115,65 @@ Inductive step : tm -> heap -> tm -> heap -> Prop :=
 Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
 
 
-Lemma extends_refl : forall S, extends S S.
+Lemma extends_refl : forall ST : store_ty, extends ST ST.
 Proof.
-intro S. unfold extends. exists []. rewrite app_nil_r. reflexivity.
+intros ST. exists []. rewrite app_nil_r. reflexivity.
 Qed.
 
 
-Lemma nth_error_extends : forall S S' n T, extends S' S -> nth_error S n = Some T -> nth_error S' n = Some T.
+Lemma extends_nth_error : forall (ST' ST : store_ty) l T, extends ST' ST -> nth_error ST l = Some T -> nth_error ST' l = Some T.
 Proof.
-intros S S' n T He Hn. unfold extends in He. destruct He as [S2 ->]. assert (n < length S) by (apply nth_error_Some; rewrite Hn; discriminate). now rewrite nth_error_app1.
+intros ST' ST l T [S2 ->] H. rewrite nth_error_app1. exact H. apply nth_error_Some. rewrite H. discriminate.
 Qed.
 
 
-Lemma heap_ok_lookup : forall mu S l v, heap_ok mu S -> heap_lookup l mu = Some v -> exists T, nth_error S l = Some T /\ has_type [] S v T.
+Lemma has_type_extends : forall G ST t T, has_type G ST t T -> forall ST', extends ST' ST -> has_type G ST' t T.
 Proof.
-intros mu S l v Hok Hlook. induction Hok.
-simpl in Hlook. discriminate.
-simpl in Hlook. destruct (Nat.eqb l l0) eqn:Heq.
-apply Nat.eqb_eq in Heq. subst v0. subst l. inversion Hlook. subst v. exists T; split; assumption.
-apply IHHok; assumption.
+intros G ST t T H. induction H; intros ST' Hext; econstructor; eauto using extends_nth_error.
 Qed.
 
 
-Lemma heap_update_ok : forall mu S l v T, heap_ok mu S -> has_type [] S v T -> nth_error S l = Some T -> heap_ok (heap_update l v mu) S.
+Lemma heap_ok_extends : forall mu ST, heap_ok mu ST -> forall ST', extends ST' ST -> heap_ok mu ST'.
 Proof.
-intros mu S l v T Hok Ht Hn. induction Hok.
-simpl. constructor.
-simpl. destruct (Nat.eqb l l0) eqn:Heq.
-apply Nat.eqb_eq in Heq. subst l0. apply (heap_cons l v mu S T Hok Ht Hn).
-apply (heap_cons l0 v0 (heap_update l v mu) S T0). apply IHHok; assumption. assumption. assumption.
+intros mu ST H. induction H; intros ST' Hext; econstructor; eauto using extends_nth_error, has_type_extends.
 Qed.
 
-Lemma shift_at_typing : forall d G S t T T',
-  has_type G S t T ->
-  has_type (firstn d G ++ T' :: skipn d G) S (shift_at d t) T.
+
+Lemma shift_at_preserves : forall G ST t T, has_type G ST t T -> forall G1 U G2, G = G1 ++ G2 -> has_type (G1 ++ U :: G2) ST (shift_at (length G1) t) T.
 Proof.
-  intros d G S t T T' Ht. revert d T'. induction Ht; intros d T'.
-  - simpl. apply T_Var.
-    destruct (x <? d) eqn:Hlt.
-    + (* x < d *)
-      apply Nat.ltb_lt in Hlt.
-      assert (Hlen: x < length (firstn d G)).
-      { rewrite firstn_length. apply Nat.min_glb_lt; auto.
-        apply nth_error_Some in H. destruct H. auto. }
-      rewrite nth_error_app1; auto.
-      rewrite nth_error_firstn. rewrite Hlt. exact H.
-    + (* x >= d *)
-      apply Nat.ltb_ge in Hlt.
-      assert (HlenG: d <= length G) by
-        (apply nth_error_Some in H; destruct H; apply Nat.le_trans with x; auto; apply Nat.lt_le_incl; auto).
-      rewrite firstn_length_le; auto.
-      rewrite nth_error_app2 by lia.
-      simpl.
-      replace (x + 1 - d) with (S (x - d)) by lia.
-      simpl.
-      rewrite nth_error_skipn.
-      replace (d + (x - d)) with x by lia.
-      exact H.
-  - simpl. apply T_Num.
-  - simpl. apply T_Bool.
-  - simpl. apply T_Succ. apply IHHt; auto.
-  - simpl. apply T_Pred. apply IHHt; auto.
-  - simpl. apply T_IsZero. apply IHHt; auto.
-  - simpl. apply T_If; [apply IHHt1|apply IHHt2|apply IHHt3]; auto.
-  - simpl. apply T_Lam. apply IHHt with (d := S d) (T'0 := T').
-  - simpl. apply T_App; [apply IHHt1|apply IHHt2]; auto.
-  - simpl. apply T_Fix. apply IHHt with (d := S d) (T'0 := T').
-  - simpl. apply T_Ref. apply IHHt; auto.
-  - simpl. apply T_Deref. apply IHHt; auto.
-  - simpl. apply T_Assign; [apply IHHt1|apply IHHt2]; auto.
-  - simpl. apply T_Loc. exact H.
+intros G ST t T H. induction H; intros G1 U G2 Heq; subst; simpl; try (econstructor; eauto; fail).
+destruct (Nat.ltb_spec x (length G1)); constructor; [ rewrite nth_error_app1 in H by lia; rewrite nth_error_app1 by lia; exact H | rewrite nth_error_app2 in H by lia; rewrite nth_error_app2 by lia; replace (x + 1 - length G1) with (Datatypes.S (x - length G1)) by lia; simpl; exact H ].
+constructor. apply (IHhas_type (T1 :: G1) U G2). reflexivity.
+constructor. apply (IHhas_type (T :: G1) U G2). reflexivity.
 Qed.
 
-Lemma substitution_lemma : forall G S s t T1 T2,
-  has_type (T1 :: G) S t T2 ->
-  has_type G S s T1 ->
-  has_type G S (subst 0 s t) T2.
+
+Lemma shift_preserves : forall G ST t T U, has_type G ST t T -> has_type (U :: G) ST (shift t) T.
 Proof.
-  intros G S s t T1 T2 Ht Hs.
-  remember (T1 :: G) as G' eqn:Heq.
-  revert s T1 T2 Hs Heq.
-  induction Ht; intros s T1 T2 Hs Heq; inversion Heq; subst; clear Heq.
-  - (* T_Var *)
-    simpl.
-    destruct (Nat.eqb x 0) eqn:Hx.
-    + apply Nat.eqb_eq in Hx; subst.
-      simpl in H; inversion H; subst; auto.
-    + apply T_Var. simpl in H. destruct x; try contradiction.
-      simpl. exact H.
-  - (* T_Num *) simpl. apply T_Num.
-  - (* T_Bool *) simpl. apply T_Bool.
-  - (* T_Succ *) simpl. apply T_Succ. apply IHHt with (s := s); auto.
-  - (* T_Pred *) simpl. apply T_Pred. apply IHHt with (s := s); auto.
-  - (* T_IsZero *) simpl. apply T_IsZero. apply IHHt with (s := s); auto.
-  - (* T_If *) simpl. apply T_If; [apply IHHt1 with (s := s)|apply IHHt2 with (s := s)|apply IHHt3 with (s := s)]; auto.
-  - (* T_Lam *)
-    simpl. apply T_Lam.
-    apply IHHt with (s := shift s) (T1 := T1) (T2 := T2).
-    + reflexivity.
-    + apply (shift_at_typing 0 G S s T1 T0); auto.
-    + reflexivity.
-  - (* T_App *) simpl. apply T_App; [apply IHHt1 with (s := s)|apply IHHt2 with (s := s)]; auto.
-  - (* T_Fix *)
-    simpl. apply T_Fix.
-    apply IHHt with (s := shift s) (T1 := T1) (T2 := T2).
-    + reflexivity.
-    + apply (shift_at_typing 0 G S s T1 T); auto.
-    + reflexivity.
-  - (* T_Ref *) simpl. apply T_Ref. apply IHHt with (s := s); auto.
-  - (* T_Deref *) simpl. apply T_Deref. apply IHHt with (s := s); auto.
-  - (* T_Assign *) simpl. apply T_Assign; [apply IHHt1 with (s := s)|apply IHHt2 with (s := s)]; auto.
-  - (* T_Loc *) simpl. apply T_Loc. exact H.
+intros G ST t T U H. apply (shift_at_preserves G ST t T H [] U G). reflexivity.
 Qed.
+
+
+Lemma subst_preserves : forall G' ST t T, has_type G' ST t T -> forall G1 U v, G' = G1 ++ [U] -> has_type G1 ST v U -> has_type G1 ST (subst (length G1) v t) T.
+Proof.
+intros G' ST t T H. induction H; intros G1 U v Heq Hv; subst; simpl; try (econstructor; eauto; fail).
+destruct (Nat.eqb_spec x (length G1)); [ subst x; rewrite nth_error_app2 in H by lia; rewrite Nat.sub_diag in H; simpl in H; injection H as ->; exact Hv | assert (Hx : x < length (G1 ++ [U])) by (apply nth_error_Some; rewrite H; discriminate); rewrite app_length in Hx; simpl in Hx; constructor; rewrite nth_error_app1 in H by lia; exact H ].
+constructor. apply (IHhas_type (T1 :: G1) U (shift v)). reflexivity. apply shift_preserves. exact Hv.
+constructor. apply (IHhas_type (T :: G1) U (shift v)). reflexivity. apply shift_preserves. exact Hv.
+Qed.
+
+
+Lemma heap_lookup_type : forall mu ST, heap_ok mu ST -> forall l v T, heap_lookup l mu = Some v -> nth_error ST l = Some T -> has_type [] ST v T.
+Proof.
+intros mu ST H. induction H; intros l0 v0 T0 Hl Hn; simpl in Hl; [ discriminate | destruct (Nat.eqb_spec l0 l); [ subst l0; injection Hl as <-; assert (T = T0) by congruence; subst T0; assumption | eauto ] ].
+Qed.
+
+
+Lemma heap_update_ok : forall mu ST, heap_ok mu ST -> forall l v T, nth_error ST l = Some T -> has_type [] ST v T -> heap_ok (heap_update l v mu) ST.
+Proof.
+intros mu ST H. induction H; intros l0 v0 T0 Hn Hv; simpl; [ constructor | destruct (Nat.eqb_spec l0 l); [ subst l0; econstructor; eauto | econstructor; eauto ] ].
+Qed.
+
 Theorem preservation :
   forall t mu t' mu' T S,
     has_type [] S t T ->
@@ -238,96 +185,11 @@ Theorem preservation :
       heap_ok mu' S' /\
       has_type [] S' t' T.
 Proof.
-  intros t mu t' mu' T S Ht Hstep.
-  generalize dependent T. generalize dependent S.
-  induction Hstep; intros S T Ht; inversion Ht; subst.
-  - (* S_Succ *)
-    apply IHHstep in H1; auto.
-    destruct H1 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_Succ.
-  - (* S_PredZero *)
-    exists S; split; [apply extends_refl|split]; eauto using T_Num.
-  - (* S_PredSucc *)
-    exists S; split; [apply extends_refl|split]; eauto using T_Num.
-  - (* S_Pred *)
-    apply IHHstep in H1; auto.
-    destruct H1 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_Pred.
-  - (* S_IsZeroZero *)
-    exists S; split; [apply extends_refl|split]; eauto using T_Bool.
-  - (* S_IsZeroSucc *)
-    exists S; split; [apply extends_refl|split]; eauto using T_Bool.
-  - (* S_IsZero *)
-    apply IHHstep with (T := TyNat) in H1; auto.
-    destruct H1 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_IsZero.
-  - (* S_IfTrue *)
-    exists S; split; [apply extends_refl|split]; auto.
-  - (* S_IfFalse *)
-    exists S; split; [apply extends_refl|split]; auto.
-  - (* S_If *)
-    apply IHHstep with (T := TyBool) in H4; auto.
-    destruct H4 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_If.
-  - (* S_App1 *)
-    apply IHHstep in H3; auto.
-    destruct H3 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_App.
-  - (* S_App2 *)
-    apply IHHstep in H6; auto.
-    destruct H6 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_App.
-  - (* S_AppAbs *)
-    inversion H4; subst.
-    eapply substitution_lemma; eauto.
-    exists S; split; [apply extends_refl|split]; eauto.
-  - (* S_Fix *)
-    eapply substitution_lemma; eauto.
-    exists S; split; [apply extends_refl|split]; eauto.
-  - (* S_Ref *)
-    inversion Ht; subst.
-    apply IHHstep in H2; auto.
-    destruct H2 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_Ref.
-  - (* S_RefV *)
-    inversion Ht; subst.
-    exists (S ++ [T0]).
-    split.
-    { unfold extends. exists [T0]. reflexivity. }
-    split.
-    { apply heap_cons; auto.
-      rewrite nth_error_app2; [| lia].
-      replace (length mu - length S) with 0 by lia.
-      simpl. reflexivity. }
-    { apply T_Loc.
-      rewrite nth_error_app2; [| lia].
-      replace (length mu - length S) with 0 by lia.
-      simpl. reflexivity. }
-  - (* S_Deref *)
-    inversion Ht; subst.
-    apply IHHstep with (T := TyRef T) in H2; auto.
-    destruct H2 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_Deref.
-  - (* S_DerefLoc *)
-    inversion Ht; subst.
-    inversion H3; subst.
-    apply heap_ok_lookup in H; auto.
-    destruct H as [T0 [Hn Hv]].
-    exists S; split; [apply extends_refl|split]; auto.
-  - (* S_Assign1 *)
-    inversion Ht; subst.
-    apply IHHstep with (T := TyNat) in H3; auto.
-    destruct H3 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_Assign.
-  - (* S_Assign2 *)
-    inversion Ht; subst.
-    inversion H3; subst.
-    apply IHHstep with (T := T1) in H5; auto.
-    destruct H5 as [S' [? [? ?]]].
-    exists S'; split; [|split]; eauto using T_Assign.
-  - (* S_AssignV *)
-    inversion Ht; subst.
-    inversion H4; subst.
-    exists S; split; [apply extends_refl|split]; eauto.
-    apply heap_update_ok; auto.
+intros t mu t' mu' T ST HT Hstep Hok Hlen. revert T HT Hok Hlen. induction Hstep; intros T0 HT Hok Hlen; inversion HT; subst; try (edestruct IHHstep as (S' & Hext & Hok' & HT'); eauto; exists S'; split; [ exact Hext | split; [ exact Hok' | econstructor; eauto using has_type_extends ] ]; fail); try (exists ST; split; [ apply extends_refl | split; [ assumption | solve [ assumption | econstructor; eauto | eapply subst_preserves; eauto ] ] ]; fail).
+inversion H4; subst. exists ST. split. apply extends_refl. split. assumption. eapply subst_preserves with (G1 := []); eauto.
+reflexivity.
+exists ST. split. apply extends_refl. split. assumption. eapply subst_preserves with (G1 := []); eauto. reflexivity.
+exists (ST ++ repeat TyNat (length mu - length ST) ++ [T]). assert (Hext : extends (ST ++ repeat TyNat (length mu - length ST) ++ [T]) ST) by (exists (repeat TyNat (length mu - length ST) ++ [T]); reflexivity). assert (Hnth : nth_error (ST ++ repeat TyNat (length mu - length ST) ++ [T]) (length mu) = Some T). { rewrite app_assoc. rewrite nth_error_app2 by (rewrite app_length, repeat_length; lia). rewrite app_length, repeat_length. replace (length mu - (length ST + (length mu - length ST))) with 0 by lia. reflexivity. } split. exact Hext. split. econstructor; eauto using heap_ok_extends, has_type_extends. constructor. exact Hnth.
+inversion H3; subst. exists ST. split. apply extends_refl. split. assumption. eapply heap_lookup_type; eauto.
+inversion H4; subst. exists ST. split. apply extends_refl. split. eapply heap_update_ok; eauto. constructor.
 Qed.

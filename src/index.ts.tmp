@@ -16,7 +16,8 @@ import {
 import { RocqLspClient } from './lsp-client.js';
 import { DocumentManager, applyTextEdits } from './document-manager.js';
 import { detectProjectConfig, mergeProjectArgs, findProjectRoot } from './project-config.js';
-import { isSkipLine, isProofEndLine, isTopLevelLine, autoAdvancePosition, insertPosition, findProofLine, computeBulletIndent, proofBounds, findAdmitLines, findTacticAdmitLines, admitSnapPosition, bulletInsertPos, admitPrefix, replaceAdmitLine, replaceAllMatchingAdmits, nextChildBullet, sealOpenGoals, applyAutoQed } from './coq-utils.js';
+import { isSkipLine, isProofEndLine, isTopLevelLine, autoAdvancePosition, insertPosition, findProofLine, computeBulletIndent, proofBounds, findAdmitLines, findTacticAdmitLines, admitSnapPosition, bulletInsertPos, admitPrefix, replaceAdmitLine, replaceAllMatchingAdmits, nextChildBullet, sealOpenGoals, applyAutoQed, parseExistentials, parseShowGoalNames, extractHoleNames, proofBodyEmpty, isAutoGoalName, isMultiSentence, referencedEvars } from './coq-utils.js';
+import type { ExistentialInfo } from './coq-utils.js';
 import type {
   Position,
   Range,
@@ -279,6 +280,28 @@ async function main() {
       }
       throw err;
     }
+  }
+
+  /**
+   * Save the document to disk AND block until the LSP has finished
+   * reprocessing it. Without this, the LSP auto-check runs
+   * asynchronously and subsequent state queries (get_state_at_pos,
+   * proof/goals, petanque/goals) race against it, producing stale
+   * goals or spurious "illegal begin of vernac" errors.
+   */
+  async function flushAndWait(file: string) {
+    await docManager.saveDocument(file);
+    const doc = docManager.getDocument(file);
+    if (!doc) throw new Error(`Document not open: ${file}`);
+    // coq/getDocument with ast:false forces a synchronous recheck.
+    // The request blocks until the check completes, after which the
+    // LSP state matches the file on disk.
+    await retryDocumentNotReady(() =>
+      lspClient.sendRequest('coq/getDocument', {
+        textDocument: { uri: doc.uri, version: doc.version },
+        ast: false,
+      }, 60_000)
+    );
   }
 
   // === LSP client setup ===
@@ -601,8 +624,8 @@ async function main() {
             'inlined as a bullet; survivors become labelled, hash-addressable ' +
             '"- (* CaseName *) admit." bullets. With cases_from=<inductive name>, ' +
             'subgoals are labelled by constructor. Report is conclusion-only per ' +
-            'survivor. Follow up per survivor with insert_tactic admit_hash=<hash>. ' +
-            'Use write=false for a dry run.',
+            'survivor. Follow up per survivor with insert_tactic admit_hash=<hash> ' +
+            'or try_step. Use write=false for a dry run.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -629,7 +652,10 @@ async function main() {
         },
         {
           name: 'check_file',
-          description: 'Force document checking and return completion status',
+          description:
+            'Force document checking and return completion status. Lists all ' +
+            'lemmas/theorems with their status (Qed/Admitted). To prove an ' +
+            'Admitted lemma: list_holes → refine_proof → fill_hole → auto-Qed.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -741,8 +767,9 @@ async function main() {
         {
           name: 'reset_proof',
           description:
-            'Wipe the proof body (from Proof. to Qed./Admitted.) and replace with fresh Admitted. ' +
-            'Use this to start over on a broken proof.',
+            'Wipe the proof body (from Proof. to Qed./Admitted.) and replace ' +
+            'with fresh Admitted. Use this to start over on a broken proof, or ' +
+            'to reset a closed proof so refine_proof can install a new skeleton.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -799,6 +826,110 @@ async function main() {
               count: { type: 'number', description: 'Number of tactic lines to remove (default: 1)' },
             },
             required: ['file', 'name'],
+          },
+        },
+        {
+          name: 'list_holes',
+          description:
+            'Term-refinement workflow: list the open named holes (existential variables) ' +
+            'of a proof — name, hypotheses, goal, shelved flag, and which other hole ' +
+            'names appear in this goal\'s type (dependency).\n\n' +
+            'Workflow: list_holes → refine_proof → fill_hole (repeat) → auto-Qed.\n' +
+            'Start here to see what remains. A virgin Admitted proof shows one unnamed ' +
+            'hole and the hint "use refine_proof".',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', description: 'Path to a .v file' },
+              name: { type: 'string', description: 'Proof name' },
+            },
+            required: ['file', 'name'],
+          },
+        },
+        {
+          name: 'refine_proof',
+          description:
+            'Term-refinement workflow: start (or restart) a proof with a term skeleton.\n' +
+            'Writes `unshelve refine (term).` after Proof. and sets up ?[named] holes\n' +
+            'that fill_hole can then address.\n\n' +
+            'Rules:\n' +
+            '• Pass the bare term (conj ?[left] ?[right]) — do NOT wrap in refine(...)\n' +
+            '• Every proof-relevant hole MUST be a named evar (?[name])\n' +
+            '• Use _ for holes Coq can solve by unification/type inference\n' +
+            '• If the proof already has a body, pass replace:true to overwrite\n' +
+            '• Spec-checked before writing — rejected terms leave the file untouched\n\n' +
+            'After writing, the response lists the open holes (name, hyps, goal).\n' +
+            'Shelved holes resolve by unification when their dependents are filled.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', description: 'Path to a .v file' },
+              name: { type: 'string', description: 'Proof name' },
+              term: {
+                type: 'string',
+                description: 'Proof term with ?[name] holes and _ for inferrable arguments. ' +
+                             'E.g. "conj ?[left] ?[right]" or ' +
+                             '"nat_ind (fun n => P n) ?[base] ?[step] n". Do NOT wrap in refine(...).',
+              },
+              replace: { type: 'boolean', description: 'Set to true to overwrite an existing proof body' },
+            },
+            required: ['file', 'name', 'term'],
+          },
+        },
+        {
+          name: 'fill_hole',
+          description:
+            'Term-refinement workflow: fill one named hole.\n\n' +
+            'Two modes, auto-selected by the number of sentences in the script:\n' +
+            '• SINGLE-SENTENCE — may introduce new ?[subholes]:\n' +
+            '    [hole]: unshelve refine (… ?[sub1] ?[sub2] …).\n' +
+            '  New holes must have globally-fresh names in this proof.\n\n' +
+            '• MULTI-SENTENCE (tactic burst) — must fully close the hole:\n' +
+            '    [hole]: { intro x. rewrite IHx. reflexivity. }\n' +
+            '  Use this for arithmetic rewriting, lia, auto, Iris proofmode, etc.\n\n' +
+            'Scripts are spec-checked before writing — failures report the goal\n' +
+            'context. Unnamed goals created by tactic fills are auto-renamed\n' +
+            '<hole>_1, <hole>_2, … to keep every goal addressable.\n\n' +
+            'Holes can close BY UNIFICATION (filling ?[pf] may solve ?[witness]\n' +
+            'whose type mentions ?[pf]) — always read the closed/new report.\n\n' +
+            'Auto-Qed: when the last hole is closed, Admitted. → Qed. automatically.\n' +
+            'Never write Qed. or Admitted. yourself.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', description: 'Path to a .v file' },
+              name: { type: 'string', description: 'Proof name' },
+              hole: {
+                type: 'string',
+                description: 'Hole name from the list_holes table — e.g. "left", "?[base]", "[step]". ' +
+                             'Leading ? and brackets are stripped; all three forms work.',
+              },
+              script: {
+                type: 'string',
+                description: 'Single sentence: "unshelve refine (… ?[new_hole] …)."\n' +
+                             'Multi-sentence: "intro x. rewrite H. reflexivity."' +
+                             ' (will be wrapped in { })',
+              },
+            },
+            required: ['file', 'name', 'hole', 'script'],
+          },
+        },
+        {
+          name: 'try_fill',
+          description:
+            'Term-refinement workflow: speculative fill_hole. Runs the script against\n' +
+            'the hole\'s current state and reports what WOULD happen (closed holes,\n' +
+            'new holes created) without modifying the file. Use before fill_hole\n' +
+            'to validate risky scripts.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', description: 'Path to a .v file' },
+              name: { type: 'string', description: 'Proof name' },
+              hole: { type: 'string', description: 'Hole name (from list_holes)' },
+              script: { type: 'string', description: 'Term refine or tactic script to test' },
+            },
+            required: ['file', 'name', 'hole', 'script'],
           },
         },
       ],
@@ -1002,6 +1133,154 @@ async function main() {
       const base = file.split('/').pop() || file;
       return `${base}:${line + 1}`;
     }
+
+  // ── Term-refinement helpers (docs/term-refinement-design.md) ──
+
+  interface HoleEntry {
+    name: string;
+    hyps: string;
+    goal: string;
+    shelved: boolean;
+    auto: boolean;   // Coq auto-name (?Goal, ?Goal0, …) — violates the naming invariant
+    pos: number;     // 1-based position among focused goals (0 if shelved)
+  }
+
+  /**
+   * Query the hole table for a petanque state.
+   *
+   * Position → name mapping comes from `Set Printing Goal Names. Show.`
+   * (goal-list order — authoritative). `Show Existentials` is used only for
+   * shelved holes: it lists evars in CREATION order, which can differ from
+   * goal order, so it must never be joined positionally with the goal list.
+   */
+  async function holesForState(st: number): Promise<HoleEntry[]> {
+    // Structured goals (hypothesis + goal display, goal-list order)
+    let goals: any[] = [];
+    try {
+      const g = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+        st, opts: { compact: false },
+      });
+      goals = g.goals || [];
+    } catch { /* no goals — finished or error */ }
+
+    // Existential names + shelved flags (creation order)
+    let exs: ExistentialInfo[] = [];
+    try {
+      const r = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+        st, tac: 'Show Existentials.', opts: { memo: false, hash: false },
+      });
+      const fbText = (r.feedback || []).map(([, m]: [number, string]) => m).join('\n');
+      exs = parseExistentials(fbText);
+    } catch { /* Show Existentials unavailable */ }
+
+    if (exs.length === 0 && goals.length === 0) return [];
+
+    // Goal-ordered names for the focused goals
+    let posNames = new Map<number, string>();
+    if (goals.length > 0) {
+      try {
+        const r = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+          st, tac: 'Set Printing Goal Names. Show.', opts: { memo: false, hash: false },
+        });
+        const fbText = (r.feedback || []).map(([, m]: [number, string]) => m).join('\n');
+        posNames = parseShowGoalNames(fbText);
+      } catch { /* fall back to synthetic names below */ }
+    }
+
+    const holes: HoleEntry[] = [];
+    const focusedNames = new Set<string>();
+    goals.forEach((g: any, i: number) => {
+      const pos = i + 1;
+      const name = posNames.get(pos) ?? `Goal${i === 0 ? '' : i - 1}`;
+      focusedNames.add(name);
+      const hyps = (g.hyps || []).map((h: any) => {
+        const names = Array.isArray(h.names) ? h.names.join(', ') : (h.name || '?');
+        return `${names} : ${(h.ty || '').replace(/\s+/g, ' ')}`;
+      }).join('; ');
+      holes.push({
+        name, hyps,
+        goal: (g.ty || '').replace(/\s+/g, ' '),
+        shelved: false,
+        auto: !posNames.has(pos) || isAutoGoalName(name),
+        pos,
+      });
+    });
+
+    // Shelved holes — not in the focused goal list
+    for (const e of exs) {
+      if (focusedNames.has(e.name)) continue;
+      if (!e.shelved) continue;
+      holes.push({
+        name: e.name, hyps: e.context, goal: e.goal,
+        shelved: true, auto: isAutoGoalName(e.name), pos: 0,
+      });
+    }
+    return holes;
+  }
+
+  /** Open a proof and query its current hole table (snap before the closer line). */
+  async function refinementContext(file: string, name: string) {
+    const doc = await ensureDocumentOpened(file);
+    const docLines = doc.text.split('\n');
+    const bounds = proofBounds(docLines, name);
+    if (!bounds) throw new Error(`Proof not found: "${name}" (needs a Proof. line and a closer)`);
+    const closer = (docLines[bounds.endLine] || '').trim();
+    const { snapLine, snapChar } = admitSnapPosition(docLines, bounds.endLine, bounds.proofLine);
+    const snapPos: Position = { line: snapLine, character: snapChar };
+    const stateR = await retryDocumentNotReady(() =>
+      lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+        uri: doc.uri, position: snapPos, opts: { memo: false },
+      })
+    );
+    const holes = await holesForState(stateR.st);
+    return { doc, docLines, bounds, closer, snapPos, st: stateR.st, holes };
+  }
+
+  function formatHoleTable(holes: HoleEntry[]): string {
+    if (holes.length === 0) return '  (no open holes)';
+    return holes.map(h => {
+      const flags: string[] = [];
+      if (h.shelved) flags.push('shelved');
+      if (h.auto) flags.push('unnamed');
+      const deps = referencedEvars(h.goal);
+      if (deps.length > 0) flags.push(`depends on: ${deps.join(', ')}`);
+      const head = `  [${h.name}]${flags.length ? '  (' + flags.join('; ') + ')' : ''}`;
+      const hy = h.hyps ? `\n      hyps: ${h.hyps}` : '';
+      return `${head}${hy}\n      ⊢ ${h.goal}`;
+    }).join('\n');
+  }
+
+  /**
+   * Build a rename script restoring the naming invariant: every unnamed
+   * (auto-named) focused goal gets `pos: refine ?[prefix_k].`
+   */
+  function buildRenameScript(holes: HoleEntry[], prefix: string): string {
+    const taken = new Set(holes.map(h => h.name));
+    const parts: string[] = [];
+    let k = 0;
+    for (const h of holes) {
+      if (!h.auto || h.shelved || h.pos <= 0) continue;
+      let nm: string;
+      do { k++; nm = `${prefix}_${k}`; } while (taken.has(nm));
+      taken.add(nm);
+      parts.push(`${h.pos}: refine ?[${nm}].`);
+    }
+    return parts.join(' ');
+  }
+
+  function normalizeHoleName(raw: string): string {
+    return raw.trim().replace(/^\?/, '').replace(/^\[/, '').replace(/\]$/, '').trim();
+  }
+
+  /** Re-sync the document with the LSP after a refinement write. */
+  async function resyncFile(file: string): Promise<void> {
+    try {
+      await docManager.closeDocument(file);
+      await ensureDocumentOpened(file);
+    } catch (e) {
+      console.error('[refinement] re-sync failed:', e);
+    }
+  }
 
     try {
       switch (name) {
@@ -1416,618 +1695,1232 @@ async function main() {
         }
 
         case 'insert_tactic': {
+        case 'insert_tactic': {
+          const rawPos = (args as any).position as Position | undefined;
           const rawPos = (args as any).position as Position | undefined;
           const { file, name, tactic: rawTactic, follow_with_goals, replace, admit_hash } = args as {
+          const { file, name, tactic: rawTactic, follow_with_goals, replace, admit_hash } = args as {
+            file: string;
             file: string;
             name: string;
+            name: string;
+            tactic: string;
             tactic: string;
             follow_with_goals?: boolean;
+            follow_with_goals?: boolean;
+            replace?: boolean;
             replace?: boolean;
             admit_hash?: string;
+            admit_hash?: string;
+          };
           };
 
+
+          currentProof.set(file, name);
           currentProof.set(file, name);
 
+
+          await ensureDocumentOpened(file);
           await ensureDocumentOpened(file);
           let doc = docManager.getDocument(file)!;
+          let doc = docManager.getDocument(file)!;
+
 
           // If replacing, delete the last inserted tactic text from the file first
+          // If replacing, delete the last inserted tactic text from the file first
+          let historyAlreadyPushed = false;
           let historyAlreadyPushed = false;
           if (replace) {
+          if (replace) {
+            const last = lastInsertion.get(file);
             const last = lastInsertion.get(file);
             if (last) {
+            if (last) {
+              pushFileHistory(file, doc.text, currentProof.get(file));
               pushFileHistory(file, doc.text, currentProof.get(file));
               historyAlreadyPushed = true;
+              historyAlreadyPushed = true;
+              const cleanedText = docManager.applyEdits(doc.text, [{
               const cleanedText = docManager.applyEdits(doc.text, [{
                 range: last.range,
+                range: last.range,
+                newText: '',
                 newText: '',
               }]);
+              }]);
               await docManager.updateDocument(file, cleanedText);
-              await docManager.saveDocument(file);
+              await docManager.updateDocument(file, cleanedText);
+              await flushAndWait(file);
+              await flushAndWait(file);
+              lastInsertion.delete(file);
               lastInsertion.delete(file);
             }
+            }
           }
+          }
+
 
           // Resolve position from name
+          // Resolve position from name
+          let docLines = doc.text.split('\n');
           let docLines = doc.text.split('\n');
           let proofLine = findProofLine(docLines, name);
+          let proofLine = findProofLine(docLines, name);
+
 
           // If Proof. line is missing, try to find the theorem and inject one
+          // If Proof. line is missing, try to find the theorem and inject one
+          let injectedProof = false;
           let injectedProof = false;
           if (proofLine < 0) {
+          if (proofLine < 0) {
+            // Find the theorem/lemma declaration line
             // Find the theorem/lemma declaration line
             const s = name.trim();
+            const s = name.trim();
+            let theoLine = -1;
             let theoLine = -1;
             for (let i = 0; i < docLines.length; i++) {
+            for (let i = 0; i < docLines.length; i++) {
+              const l = docLines[i].trim();
               const l = docLines[i].trim();
               const kw = l.split(/\s+/)[0];
+              const kw = l.split(/\s+/)[0];
+              if ((kw === 'Lemma' || kw === 'Theorem' || kw === 'Corollary' || kw === 'Example') &&
               if ((kw === 'Lemma' || kw === 'Theorem' || kw === 'Corollary' || kw === 'Example') &&
                   l.includes(s + ' :')) {
+                  l.includes(s + ' :')) {
+                theoLine = i;
                 theoLine = i;
                 break;
+                break;
               }
+              }
+            }
             }
             if (theoLine < 0) throw new Error(`Proof not found: "${name}"`);
+            if (theoLine < 0) throw new Error(`Proof not found: "${name}"`);
+            // Scan from theoLine+1 to find where Proof. should go — before first non-blank content
             // Scan from theoLine+1 to find where Proof. should go — before first non-blank content
             let insertHere = theoLine + 1;
+            let insertHere = theoLine + 1;
+            while (insertHere < docLines.length && (docLines[insertHere] || '').trim() === '') {
             while (insertHere < docLines.length && (docLines[insertHere] || '').trim() === '') {
               insertHere++;
+              insertHere++;
+            }
             }
             // Inject Proof. line
+            // Inject Proof. line
+            const withProof = docManager.applyEdits(doc.text, [{
             const withProof = docManager.applyEdits(doc.text, [{
               range: { start: { line: insertHere, character: 0 }, end: { line: insertHere, character: 0 } },
+              range: { start: { line: insertHere, character: 0 }, end: { line: insertHere, character: 0 } },
+              newText: 'Proof.\n',
               newText: 'Proof.\n',
             }]);
+            }]);
             await docManager.updateDocument(file, withProof);
-            await docManager.saveDocument(file);
+            await docManager.updateDocument(file, withProof);
+            await flushAndWait(file);
+            await flushAndWait(file);
+            // Refresh doc and retry
             // Refresh doc and retry
             doc = docManager.getDocument(file)!;
+            doc = docManager.getDocument(file)!;
+            docLines = doc.text.split('\n');
             docLines = doc.text.split('\n');
             proofLine = findProofLine(docLines, name);
+            proofLine = findProofLine(docLines, name);
+            if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
             if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
             injectedProof = true;
+            injectedProof = true;
           }
+          }
+
 
           const position = { line: proofLine, character: 0 };
+          const position = { line: proofLine, character: 0 };
+
 
           // Advance past Proof. and blank lines to the actual insert point
+          // Advance past Proof. and blank lines to the actual insert point
+          let insPos: Position;
           let insPos: Position;
           let fromAdmitReplacement = false;
+          let fromAdmitReplacement = false;
+          const admitPos = lastAdmitReplaced.get(file);
           const admitPos = lastAdmitReplaced.get(file);
           if (admitPos !== undefined) {
+          if (admitPos !== undefined) {
+            insPos = { line: admitPos, character: bulletInsertPos(docLines[admitPos] || '') };
             insPos = { line: admitPos, character: bulletInsertPos(docLines[admitPos] || '') };
             fromAdmitReplacement = true;
+            fromAdmitReplacement = true;
+            lastAdmitReplaced.delete(file);
             lastAdmitReplaced.delete(file);
           } else {
+          } else {
+            insPos = insertPosition(doc.text, position);
             insPos = insertPosition(doc.text, position);
           }
+          }
+
 
           // Handle "Proof. Admitted." on one line: split so tactic goes between them
+          // Handle "Proof. Admitted." on one line: split so tactic goes between them
+          // and Admitted. is preserved at the end
           // and Admitted. is preserved at the end
           let oneLineSplit = false;
+          let oneLineSplit = false;
+          if (insPos.line > 0) {
           if (insPos.line > 0) {
             const prev = (docLines[insPos.line - 1] || '').trim();
+            const prev = (docLines[insPos.line - 1] || '').trim();
+            if (prev.startsWith('Proof.') && prev !== 'Proof.' &&
             if (prev.startsWith('Proof.') && prev !== 'Proof.' &&
                 (prev.includes('Admitted.') || prev.includes('Qed.') || prev.includes('Defined.'))) {
+                (prev.includes('Admitted.') || prev.includes('Qed.') || prev.includes('Defined.'))) {
+              oneLineSplit = true;
               oneLineSplit = true;
               insPos = { line: insPos.line - 1, character: 0 };
+              insPos = { line: insPos.line - 1, character: 0 };
+            }
             }
           }
+          }
+
 
           // Auto-bullet: query proof state to determine if bullet prefix is needed
+          // Auto-bullet: query proof state to determine if bullet prefix is needed
+          let tactic = rawTactic.trim();
           let tactic = rawTactic.trim();
           // Auto-`.`: append period if caller forgot it (e.g. "intros H" → "intros H.")
+          // Auto-`.`: append period if caller forgot it (e.g. "intros H" → "intros H.")
+          if (tactic.length > 0 && !tactic.endsWith('.')) {
           if (tactic.length > 0 && !tactic.endsWith('.')) {
             tactic = tactic + '.';
+            tactic = tactic + '.';
           }
+          }
+
 
           // If admit_hash is provided, find and replace the admit with the new tactic
+          // If admit_hash is provided, find and replace the admit with the new tactic
+          if (admit_hash) {
           if (admit_hash) {
             // Re-fetch doc to ensure we have the latest version from disk
+            // Re-fetch doc to ensure we have the latest version from disk
+            const freshDoc = await ensureDocumentOpened(file);
             const freshDoc = await ensureDocumentOpened(file);
             const docLines = freshDoc.text.split('\n');
+            const docLines = freshDoc.text.split('\n');
+            const bounds = proofBounds(docLines, name);
             const bounds = proofBounds(docLines, name);
             if (!bounds) throw new Error(`Proof not found: "${name}"`);
+            if (!bounds) throw new Error(`Proof not found: "${name}"`);
+            const admitLines = findAdmitLines(docLines, bounds.proofLine, bounds.endLine);
             const admitLines = findAdmitLines(docLines, bounds.proofLine, bounds.endLine);
             // Collect ALL admit lines matching this hash
+            // Collect ALL admit lines matching this hash
+            const targetLines: number[] = [];
             const targetLines: number[] = [];
             for (const line of admitLines) {
+            for (const line of admitLines) {
+              try {
               try {
                 const { snapLine, snapChar } = admitSnapPosition(docLines, line, bounds.proofLine);
+                const { snapLine, snapChar } = admitSnapPosition(docLines, line, bounds.proofLine);
+                const stateR = await retryDocumentNotReady(() =>
                 const stateR = await retryDocumentNotReady(() =>
                   lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                  lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                    uri: freshDoc.uri, position: { line: snapLine, character: snapChar }, opts: { memo: false },
                     uri: freshDoc.uri, position: { line: snapLine, character: snapChar }, opts: { memo: false },
                   })
+                  })
+                );
                 );
                 const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                  st: stateR.st, opts: { compact: true },
                   st: stateR.st, opts: { compact: true },
                 });
+                });
+                const goalText = (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
                 const goalText = (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
                 const h = createHash('md5').update(goalText).digest('hex').slice(0, 8);
+                const h = createHash('md5').update(goalText).digest('hex').slice(0, 8);
+                if (h === admit_hash) targetLines.push(line);
                 if (h === admit_hash) targetLines.push(line);
               } catch {}
+              } catch {}
+            }
             }
             if (targetLines.length === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
+            if (targetLines.length === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
+
 
             // Apply tactic to ALL matching admits using shared replaceAllMatchingAdmits.
+            // Apply tactic to ALL matching admits using shared replaceAllMatchingAdmits.
+            // getGoalText calls the LSP — same function as focus_proof admits section uses.
             // getGoalText calls the LSP — same function as focus_proof admits section uses.
             pushFileHistory(file, freshDoc.text, null);
+            pushFileHistory(file, freshDoc.text, null);
+            const { text: finalText, count: totalReplaced } = await replaceAllMatchingAdmits(
             const { text: finalText, count: totalReplaced } = await replaceAllMatchingAdmits(
               freshDoc.text, name, tactic, admit_hash,
+              freshDoc.text, name, tactic, admit_hash,
+              async (line, currentText) => {
               async (line, currentText) => {
                 try {
+                try {
+                  const tempDoc = await docManager.updateDocument(file, currentText);
                   const tempDoc = await docManager.updateDocument(file, currentText);
                   const currentLines = currentText.split('\n');
+                  const currentLines = currentText.split('\n');
+                  const currentBounds = proofBounds(currentLines, name);
                   const currentBounds = proofBounds(currentLines, name);
                   const { snapLine, snapChar } = admitSnapPosition(
+                  const { snapLine, snapChar } = admitSnapPosition(
+                    currentLines, line, currentBounds?.proofLine ?? 0
                     currentLines, line, currentBounds?.proofLine ?? 0
                   );
+                  );
+                  const stateR = await retryDocumentNotReady(() =>
                   const stateR = await retryDocumentNotReady(() =>
                     lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                    lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                      uri: tempDoc.uri, position: { line: snapLine, character: snapChar }, opts: { memo: false },
                       uri: tempDoc.uri, position: { line: snapLine, character: snapChar }, opts: { memo: false },
                     })
-                  );
-                  const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
-                    st: stateR.st, opts: { compact: true },
-                  });
-                  return (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
-                } catch { return null; }
-              }
-            );
-
-            if (totalReplaced === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
-            await docManager.updateDocument(file, finalText);
-            await docManager.saveDocument(file);
-            const firstTargetLine = 0; // approximate — used for reply location only
-
-            // Force LSP re-sync before querying goals
-            try {
-              await docManager.closeDocument(file);
-              await ensureDocumentOpened(file);
-            } catch {}
-
-            // Re-seal open goals and auto-Qed using shared coq-utils helpers.
-            let sealMsg = '';
-            let autoQedMsg = '';
-            try {
-              const freshDoc = docManager.getDocument(file)!;
-              const firstLine = targetLines[0];
-              const docLines = finalText.split('\n');
-              const tacticLines = (tactic.match(/\n/g) || []).length + 1;
-              const tacticEndLine = firstLine + tacticLines - 1;
-              // Query goals at the END of the last tactic line (After mode) to
-              // see what goals remain directly after the tactic, not at the next bullet.
-              const tacticEndChar = (docLines[tacticEndLine] || '').length;
-              const goalsR = await retryDocumentNotReady(() =>
-                lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-                  textDocument: { uri: freshDoc.uri, version: freshDoc.version },
-                  position: { line: tacticEndLine, character: tacticEndChar },
-                  pp_format: 'Str', mode: 'After',
-                })
-              );
-              const nF = goalsR?.goals?.goals?.length ?? 0;
-              const nBgAfter = (goalsR?.goals?.stack || []).reduce(
-                (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
-              );
-              // Re-seal if the tactic left focused goals open at the tactic end position.
-              if (nF > 0) {
-                const parentBulletLine = docLines[firstLine] || '';
-                const { text: sealed, sealMsg: msg } = sealOpenGoals(
-                  finalText, tacticEndLine, nF, parentBulletLine
-                );
-                sealMsg = ` (${msg})`;
-                await docManager.updateDocument(file, sealed);
-                await docManager.saveDocument(file);
-              }
-            } catch { /* best-effort */ }
-
-            try {
-              const currentDoc = docManager.getDocument(file)!;
-              const currentLines = currentDoc.text.split('\n');
-              const currentBounds = proofBounds(currentLines, name);
-              // Before auto-Qed, check there are no focused goals remaining at Admitted.
-              // applyAutoQed only checks for tactic-level admit. lines, not focused goals.
-              let hasFocusedGoals = false;
-              if (currentBounds) {
-                const admittedLine = currentBounds.endLine;
-                if (currentLines[admittedLine]?.trim() === 'Admitted.') {
-                  try {
-                    const { snapLine: sl, snapChar: sc } = admitSnapPosition(
-                      currentLines, admittedLine, currentBounds.proofLine
-                    );
-                    const sR = await retryDocumentNotReady(() =>
-                      lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
-                        uri: currentDoc.uri, position: { line: sl, character: sc }, opts: { memo: false },
-                      })
-                    );
-                    const gR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
-                      st: sR.st, opts: { compact: true },
-                    });
-                    const nFocused = gR.goals?.length ?? 0;
-                    const nBg = (gR.stack || []).reduce(
-                      (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
-                    );
-                    hasFocusedGoals = nFocused > 0 || nBg > 0;
-                  } catch {}
-                }
-              }
-              if (!hasFocusedGoals) {
-                const { text: qedText, applied } = applyAutoQed(currentDoc.text, name);
-                if (applied) {
-                  await docManager.updateDocument(file, qedText);
-                  await docManager.saveDocument(file);
-                  autoQedMsg = ' — Qed applied';
-                }
-              }
-            } catch { /* best-effort */ }
-
-            const n = targetLines.length;
-            let remainingMsg = '';
-            let currentGoalMsg = '';
-            try {
-              const finalDoc = docManager.getDocument(file)!;
-              const finalLines = finalDoc.text.split('\n');
-              const finalBounds = proofBounds(finalLines, name);
-              if (finalBounds) {
-                // Current goal at insertion point
-                const queryLine = Math.min(targetLines[0] + (tactic.match(/\n/g) || []).length, finalLines.length - 1);
-                try {
-                  const goalR = await retryDocumentNotReady(() =>
-                    lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-                      textDocument: { uri: finalDoc.uri, version: finalDoc.version },
-                      position: { line: queryLine, character: (finalLines[queryLine] || '').length },
-                      pp_format: 'Str', mode: 'After',
                     })
                   );
-                  const goals = goalR?.goals?.goals || [];
-                  if (goals.length > 0) {
-                    currentGoalMsg = '\ncurrent: ' + goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
-                  }
-                } catch {}
-
-                // Remaining admits — show hash, hyps, and goal for each
-                const admitLines = findAdmitLines(finalLines, finalBounds.proofLine, finalBounds.endLine);
-                if (admitLines.length > 0) {
-                  const remaining: string[] = [];
-                  for (const line of admitLines) {
-                    try {
-                      const { snapLine, snapChar } = admitSnapPosition(finalLines, line, finalBounds.proofLine);
-                      const stateR = await retryDocumentNotReady(() =>
-                        lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
-                          uri: finalDoc.uri,
-                          position: { line: snapLine, character: snapChar },
-                          opts: { memo: false },
-                        })
-                      );
-                      const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
-                        st: stateR.st, opts: { compact: true },
-                      });
-                      const goals = goalsR.goals || [];
-                      const goalText = goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
-                      const hash = createHash("md5").update(goalText).digest("hex").slice(0, 8);
-                      let hyps = '';
-                      try {
-                        const goalsFullR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
-                          st: stateR.st, opts: { compact: false },
-                        });
-                        const fullGoal = (goalsFullR.goals || [])[0];
-                        if (fullGoal?.hyps) {
-                          hyps = (fullGoal.hyps as any[]).map((h: any) => {
-                            const names = Array.isArray(h.names) ? h.names.join(', ') : (h.name || '?');
-                            const ty = (h.ty || '').replace(/\s+/g, ' ');
-                            return `${names} : ${ty}`;
-                          }).join('; ');
-                        }
-                      } catch {}
-                      remaining.push(`${hash}  L${line + 1}:`);
-                      if (hyps) remaining.push(`  hyps: ${hyps}`);
-                      remaining.push(`  goal: ${goalText || '(no goals)'}`);
-                    } catch {
-                      remaining.push(`error  L${line + 1}: (could not query)`);
-                    }
-                  }
-                  remainingMsg = `\n${admitLines.length} admit(s) remaining:\n` + remaining.join('\n');
-                } else if (autoQedMsg === '') {
-                  remainingMsg = '\n0 admits remaining';
-                }
+                  );
+                  const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                  const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                    st: stateR.st, opts: { compact: true },
+                    st: stateR.st, opts: { compact: true },
+                  });
+                  });
+                  return (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                  return (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                } catch { return null; }
+                } catch { return null; }
               }
+              }
+            );
+            );
+
+
+            if (totalReplaced === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
+            if (totalReplaced === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
+            await docManager.updateDocument(file, finalText);
+            await docManager.updateDocument(file, finalText);
+            await flushAndWait(file);
+            await flushAndWait(file);
+            const firstTargetLine = 0; // approximate — used for reply location only
+            const firstTargetLine = 0; // approximate — used for reply location only
+
+
+            // Force LSP re-sync before querying goals
+            // Force LSP re-sync before querying goals
+            try {
+            try {
+              await docManager.closeDocument(file);
+              await docManager.closeDocument(file);
+              await ensureDocumentOpened(file);
+              await ensureDocumentOpened(file);
+            } catch {}
             } catch {}
 
+
+            // Re-seal open goals and auto-Qed using shared coq-utils helpers.
+            // Re-seal open goals and auto-Qed using shared coq-utils helpers.
+            let sealMsg = '';
+            let sealMsg = '';
+            let autoQedMsg = '';
+            let autoQedMsg = '';
+            try {
+            try {
+              const freshDoc = docManager.getDocument(file)!;
+              const freshDoc = docManager.getDocument(file)!;
+              const firstLine = targetLines[0];
+              const firstLine = targetLines[0];
+              const docLines = finalText.split('\n');
+              const docLines = finalText.split('\n');
+              const tacticLines = (tactic.match(/\n/g) || []).length + 1;
+              const tacticLines = (tactic.match(/\n/g) || []).length + 1;
+              const tacticEndLine = firstLine + tacticLines - 1;
+              const tacticEndLine = firstLine + tacticLines - 1;
+              // Query goals at the END of the last tactic line (After mode) to
+              // Query goals at the END of the last tactic line (After mode) to
+              // see what goals remain directly after the tactic, not at the next bullet.
+              // see what goals remain directly after the tactic, not at the next bullet.
+              const tacticEndChar = (docLines[tacticEndLine] || '').length;
+              const tacticEndChar = (docLines[tacticEndLine] || '').length;
+              const goalsR = await retryDocumentNotReady(() =>
+              const goalsR = await retryDocumentNotReady(() =>
+                lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                  textDocument: { uri: freshDoc.uri, version: freshDoc.version },
+                  textDocument: { uri: freshDoc.uri, version: freshDoc.version },
+                  position: { line: tacticEndLine, character: tacticEndChar },
+                  position: { line: tacticEndLine, character: tacticEndChar },
+                  pp_format: 'Str', mode: 'After',
+                  pp_format: 'Str', mode: 'After',
+                })
+                })
+              );
+              );
+              const nF = goalsR?.goals?.goals?.length ?? 0;
+              const nF = goalsR?.goals?.goals?.length ?? 0;
+              const nBgAfter = (goalsR?.goals?.stack || []).reduce(
+              const nBgAfter = (goalsR?.goals?.stack || []).reduce(
+                (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
+                (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
+              );
+              );
+              // Re-seal if the tactic left focused goals open at the tactic end position.
+              // Re-seal if the tactic left focused goals open at the tactic end position.
+              if (nF > 0) {
+              if (nF > 0) {
+                const parentBulletLine = docLines[firstLine] || '';
+                const parentBulletLine = docLines[firstLine] || '';
+                const { text: sealed, sealMsg: msg } = sealOpenGoals(
+                const { text: sealed, sealMsg: msg } = sealOpenGoals(
+                  finalText, tacticEndLine, nF, parentBulletLine
+                  finalText, tacticEndLine, nF, parentBulletLine
+                );
+                );
+                sealMsg = ` (${msg})`;
+                sealMsg = ` (${msg})`;
+                await docManager.updateDocument(file, sealed);
+                await docManager.updateDocument(file, sealed);
+                await flushAndWait(file);
+                await flushAndWait(file);
+              }
+              }
+            } catch { /* best-effort */ }
+            } catch { /* best-effort */ }
+
+
+            try {
+            try {
+              const currentDoc = docManager.getDocument(file)!;
+              const currentDoc = docManager.getDocument(file)!;
+              const currentLines = currentDoc.text.split('\n');
+              const currentLines = currentDoc.text.split('\n');
+              const currentBounds = proofBounds(currentLines, name);
+              const currentBounds = proofBounds(currentLines, name);
+              // Before auto-Qed, check there are no focused goals remaining at Admitted.
+              // Before auto-Qed, check there are no focused goals remaining at Admitted.
+              // applyAutoQed only checks for tactic-level admit. lines, not focused goals.
+              // applyAutoQed only checks for tactic-level admit. lines, not focused goals.
+              let hasFocusedGoals = false;
+              let hasFocusedGoals = false;
+              if (currentBounds) {
+              if (currentBounds) {
+                const admittedLine = currentBounds.endLine;
+                const admittedLine = currentBounds.endLine;
+                if (currentLines[admittedLine]?.trim() === 'Admitted.') {
+                if (currentLines[admittedLine]?.trim() === 'Admitted.') {
+                  try {
+                  try {
+                    const { snapLine: sl, snapChar: sc } = admitSnapPosition(
+                    const { snapLine: sl, snapChar: sc } = admitSnapPosition(
+                      currentLines, admittedLine, currentBounds.proofLine
+                      currentLines, admittedLine, currentBounds.proofLine
+                    );
+                    );
+                    const sR = await retryDocumentNotReady(() =>
+                    const sR = await retryDocumentNotReady(() =>
+                      lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                      lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                        uri: currentDoc.uri, position: { line: sl, character: sc }, opts: { memo: false },
+                        uri: currentDoc.uri, position: { line: sl, character: sc }, opts: { memo: false },
+                      })
+                      })
+                    );
+                    );
+                    const gR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                    const gR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                      st: sR.st, opts: { compact: true },
+                      st: sR.st, opts: { compact: true },
+                    });
+                    });
+                    const nFocused = gR.goals?.length ?? 0;
+                    const nFocused = gR.goals?.length ?? 0;
+                    const nBg = (gR.stack || []).reduce(
+                    const nBg = (gR.stack || []).reduce(
+                      (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
+                      (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
+                    );
+                    );
+                    hasFocusedGoals = nFocused > 0 || nBg > 0;
+                    hasFocusedGoals = nFocused > 0 || nBg > 0;
+                  } catch {}
+                  } catch {}
+                }
+                }
+              }
+              }
+              if (!hasFocusedGoals) {
+              if (!hasFocusedGoals) {
+                const { text: qedText, applied } = applyAutoQed(currentDoc.text, name);
+                const { text: qedText, applied } = applyAutoQed(currentDoc.text, name);
+                if (applied) {
+                if (applied) {
+                  await docManager.updateDocument(file, qedText);
+                  await docManager.updateDocument(file, qedText);
+                  await flushAndWait(file);
+                  await flushAndWait(file);
+                  autoQedMsg = ' — Qed applied';
+                  autoQedMsg = ' — Qed applied';
+                }
+                }
+              }
+              }
+            } catch { /* best-effort */ }
+            } catch { /* best-effort */ }
+
+
+            const n = targetLines.length;
+            const n = targetLines.length;
+            let remainingMsg = '';
+            let remainingMsg = '';
+            let currentGoalMsg = '';
+            let currentGoalMsg = '';
+            try {
+            try {
+              const finalDoc = docManager.getDocument(file)!;
+              const finalDoc = docManager.getDocument(file)!;
+              const finalLines = finalDoc.text.split('\n');
+              const finalLines = finalDoc.text.split('\n');
+              const finalBounds = proofBounds(finalLines, name);
+              const finalBounds = proofBounds(finalLines, name);
+              if (finalBounds) {
+              if (finalBounds) {
+                // Current goal at insertion point
+                // Current goal at insertion point
+                const queryLine = Math.min(targetLines[0] + (tactic.match(/\n/g) || []).length, finalLines.length - 1);
+                const queryLine = Math.min(targetLines[0] + (tactic.match(/\n/g) || []).length, finalLines.length - 1);
+                try {
+                try {
+                  const goalR = await retryDocumentNotReady(() =>
+                  const goalR = await retryDocumentNotReady(() =>
+                    lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                    lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                      textDocument: { uri: finalDoc.uri, version: finalDoc.version },
+                      textDocument: { uri: finalDoc.uri, version: finalDoc.version },
+                      position: { line: queryLine, character: (finalLines[queryLine] || '').length },
+                      position: { line: queryLine, character: (finalLines[queryLine] || '').length },
+                      pp_format: 'Str', mode: 'After',
+                      pp_format: 'Str', mode: 'After',
+                    })
+                    })
+                  );
+                  );
+                  const goals = goalR?.goals?.goals || [];
+                  const goals = goalR?.goals?.goals || [];
+                  if (goals.length > 0) {
+                  if (goals.length > 0) {
+                    currentGoalMsg = '\ncurrent: ' + goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                    currentGoalMsg = '\ncurrent: ' + goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                  }
+                  }
+                } catch {}
+                } catch {}
+
+
+                // Remaining admits — show hash, hyps, and goal for each
+                // Remaining admits — show hash, hyps, and goal for each
+                const admitLines = findAdmitLines(finalLines, finalBounds.proofLine, finalBounds.endLine);
+                const admitLines = findAdmitLines(finalLines, finalBounds.proofLine, finalBounds.endLine);
+                if (admitLines.length > 0) {
+                if (admitLines.length > 0) {
+                  const remaining: string[] = [];
+                  const remaining: string[] = [];
+                  for (const line of admitLines) {
+                  for (const line of admitLines) {
+                    try {
+                    try {
+                      const { snapLine, snapChar } = admitSnapPosition(finalLines, line, finalBounds.proofLine);
+                      const { snapLine, snapChar } = admitSnapPosition(finalLines, line, finalBounds.proofLine);
+                      const stateR = await retryDocumentNotReady(() =>
+                      const stateR = await retryDocumentNotReady(() =>
+                        lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                        lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                          uri: finalDoc.uri,
+                          uri: finalDoc.uri,
+                          position: { line: snapLine, character: snapChar },
+                          position: { line: snapLine, character: snapChar },
+                          opts: { memo: false },
+                          opts: { memo: false },
+                        })
+                        })
+                      );
+                      );
+                      const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                      const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                        st: stateR.st, opts: { compact: true },
+                        st: stateR.st, opts: { compact: true },
+                      });
+                      });
+                      const goals = goalsR.goals || [];
+                      const goals = goalsR.goals || [];
+                      const goalText = goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                      const goalText = goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                      const hash = createHash("md5").update(goalText).digest("hex").slice(0, 8);
+                      const hash = createHash("md5").update(goalText).digest("hex").slice(0, 8);
+                      let hyps = '';
+                      let hyps = '';
+                      try {
+                      try {
+                        const goalsFullR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                        const goalsFullR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                          st: stateR.st, opts: { compact: false },
+                          st: stateR.st, opts: { compact: false },
+                        });
+                        });
+                        const fullGoal = (goalsFullR.goals || [])[0];
+                        const fullGoal = (goalsFullR.goals || [])[0];
+                        if (fullGoal?.hyps) {
+                        if (fullGoal?.hyps) {
+                          hyps = (fullGoal.hyps as any[]).map((h: any) => {
+                          hyps = (fullGoal.hyps as any[]).map((h: any) => {
+                            const names = Array.isArray(h.names) ? h.names.join(', ') : (h.name || '?');
+                            const names = Array.isArray(h.names) ? h.names.join(', ') : (h.name || '?');
+                            const ty = (h.ty || '').replace(/\s+/g, ' ');
+                            const ty = (h.ty || '').replace(/\s+/g, ' ');
+                            return `${names} : ${ty}`;
+                            return `${names} : ${ty}`;
+                          }).join('; ');
+                          }).join('; ');
+                        }
+                        }
+                      } catch {}
+                      } catch {}
+                      remaining.push(`${hash}  L${line + 1}:`);
+                      remaining.push(`${hash}  L${line + 1}:`);
+                      if (hyps) remaining.push(`  hyps: ${hyps}`);
+                      if (hyps) remaining.push(`  hyps: ${hyps}`);
+                      remaining.push(`  goal: ${goalText || '(no goals)'}`);
+                      remaining.push(`  goal: ${goalText || '(no goals)'}`);
+                    } catch {
+                    } catch {
+                      remaining.push(`error  L${line + 1}: (could not query)`);
+                      remaining.push(`error  L${line + 1}: (could not query)`);
+                    }
+                    }
+                  }
+                  }
+                  remainingMsg = `\n${admitLines.length} admit(s) remaining:\n` + remaining.join('\n');
+                  remainingMsg = `\n${admitLines.length} admit(s) remaining:\n` + remaining.join('\n');
+                } else if (autoQedMsg === '') {
+                } else if (autoQedMsg === '') {
+                  remainingMsg = '\n0 admits remaining';
+                  remainingMsg = '\n0 admits remaining';
+                }
+                }
+              }
+              }
+            } catch {}
+            } catch {}
+
+
+            return reply(
             return reply(
               `${fileLine(file, targetLines[0])} — replaced ${n} admit(s) with "${tactic.trim()}"${sealMsg}${autoQedMsg}${currentGoalMsg}${remainingMsg}`,
+              `${fileLine(file, targetLines[0])} — replaced ${n} admit(s) with "${tactic.trim()}"${sealMsg}${autoQedMsg}${currentGoalMsg}${remainingMsg}`,
+              { applied: true, count: n }
               { applied: true, count: n }
             );
+            );
           }
+          }
+
+
 
 
           // Determine whether the user already supplied a bullet prefix.
+          // Determine whether the user already supplied a bullet prefix.
+          // Used both inside and outside the bullet-logic try block.
           // Used both inside and outside the bullet-logic try block.
           const tacticFirstWord = tactic.split(/\s+/)[0];
+          const tacticFirstWord = tactic.split(/\s+/)[0];
+          const hasBullet = /^[-+*]+$/.test(tacticFirstWord) || tacticFirstWord === '{';
           const hasBullet = /^[-+*]+$/.test(tacticFirstWord) || tacticFirstWord === '{';
 
+
+          if (!fromAdmitReplacement) {
           if (!fromAdmitReplacement) {
           try {
+          try {
+            // Query at end of previous non-blank line to get correct stack depth
             // Query at end of previous non-blank line to get correct stack depth
             // after bullet closure (insPos is the start of a blank/clean line,
+            // after bullet closure (insPos is the start of a blank/clean line,
+            // which still reports the previous bullet context as active in Prev mode)
             // which still reports the previous bullet context as active in Prev mode)
             let queryLine = insPos.line - 1;
+            let queryLine = insPos.line - 1;
+            while (queryLine >= 0 && (docLines[queryLine] || '').trim() === '') {
             while (queryLine >= 0 && (docLines[queryLine] || '').trim() === '') {
               queryLine--;
+              queryLine--;
+            }
             }
             const queryPos = queryLine >= 0
+            const queryPos = queryLine >= 0
+              ? { line: queryLine, character: (docLines[queryLine] || '').length }
               ? { line: queryLine, character: (docLines[queryLine] || '').length }
               : insPos;
+              : insPos;
+            const stateResult = await retryDocumentNotReady(() =>
             const stateResult = await retryDocumentNotReady(() =>
               lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+              lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                textDocument: { uri: doc.uri, version: doc.version },
                 textDocument: { uri: doc.uri, version: doc.version },
                 position: queryPos,
+                position: queryPos,
+                pp_format: 'Str',
                 pp_format: 'Str',
                 mode: 'After',
+                mode: 'After',
+              })
               })
             );
+            );
+            const bgCount = (stateResult.goals?.stack || []).reduce(
             const bgCount = (stateResult.goals?.stack || []).reduce(
               (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
+              (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
+            );
             );
             const focusedGoals = stateResult.goals?.goals?.length || 0;
+            const focusedGoals = stateResult.goals?.goals?.length || 0;
+            const totalRemaining = focusedGoals + bgCount;
             const totalRemaining = focusedGoals + bgCount;
             const lspBullet = stateResult.goals?.bullet;
+            const lspBullet = stateResult.goals?.bullet;
+            const lspBulletChar = bulletTokenFromMessage(lspBullet);
             const lspBulletChar = bulletTokenFromMessage(lspBullet);
             const lspSuggestsNext = !!lspBullet?.includes('Focus next goal');
+            const lspSuggestsNext = !!lspBullet?.includes('Focus next goal');
+            const lspUnfinished = !!lspBullet?.includes('unfinished') || !!lspBullet?.includes('not finished');
             const lspUnfinished = !!lspBullet?.includes('unfinished') || !!lspBullet?.includes('not finished');
             let bullet: string | undefined;
+            let bullet: string | undefined;
+
 
             const atLineStart = insPos.character === 0;
+            const atLineStart = insPos.character === 0;
+            let indent = '';
             let indent = '';
 
+
+            if (lspSuggestsNext && lspBulletChar) {
             if (lspSuggestsNext && lspBulletChar) {
               // Coq says a sibling/current-level bullet is mandatory. Trust it.
+              // Coq says a sibling/current-level bullet is mandatory. Trust it.
+              bullet = lspBulletChar;
               bullet = lspBulletChar;
               const suggestedIndent = findLastBulletIndent(docLines, insPos.line, proofLine, bullet);
+              const suggestedIndent = findLastBulletIndent(docLines, insPos.line, proofLine, bullet);
+              indent = ' '.repeat(suggestedIndent ?? 0);
               indent = ' '.repeat(suggestedIndent ?? 0);
             } else if (lspUnfinished && lspBulletChar && focusedGoals > 1) {
+            } else if (lspUnfinished && lspBulletChar && focusedGoals > 1) {
+              // Current bullet has multiple focused goals. Open a child bullet with
               // Current bullet has multiple focused goals. Open a child bullet with
               // a different token; same-token bullets pop/reuse the parent focus.
+              // a different token; same-token bullets pop/reuse the parent focus.
+              bullet = nextChildBullet(lspBulletChar);
               bullet = nextChildBullet(lspBulletChar);
               const parentIndent = findLastBulletIndent(docLines, insPos.line, proofLine, lspBulletChar)
+              const parentIndent = findLastBulletIndent(docLines, insPos.line, proofLine, lspBulletChar)
+                ?? computeBulletIndent(doc.text, insPos, proofLine).length;
                 ?? computeBulletIndent(doc.text, insPos, proofLine).length;
               indent = ' '.repeat(parentIndent + 2);
+              indent = ' '.repeat(parentIndent + 2);
+            } else if (!lspBullet && totalRemaining > 1 && !hasBullet && computeBulletIndent(doc.text, insPos, proofLine)) {
             } else if (!lspBullet && totalRemaining > 1 && !hasBullet && computeBulletIndent(doc.text, insPos, proofLine)) {
               // Inside an existing bullet structure with no active bullet context —
+              // Inside an existing bullet structure with no active bullet context —
+              // auto-open the next sibling. Only fires if there are already bullet
               // auto-open the next sibling. Only fires if there are already bullet
               // lines in the proof body (computeBulletIndent returns non-empty).
+              // lines in the proof body (computeBulletIndent returns non-empty).
+              // Does NOT fire at the top level of a fresh proof (no prior bullets).
               // Does NOT fire at the top level of a fresh proof (no prior bullets).
               bullet = '-';
+              bullet = '-';
+              indent = '';
               indent = '';
             } else if (atLineStart) {
+            } else if (atLineStart) {
+              indent = computeBulletIndent(doc.text, insPos, proofLine);
               indent = computeBulletIndent(doc.text, insPos, proofLine);
             }
-
-            if (bullet && !hasBullet && tactic !== 'Qed.' && tactic !== 'Defined.' && tactic !== 'Admitted.') {
-              tactic = `${indent}${bullet} ${tactic}`;
-            } else if (atLineStart) {
-              tactic = `${indent}${tactic}`;
             }
 
+
+            if (bullet && !hasBullet && tactic !== 'Qed.' && tactic !== 'Defined.' && tactic !== 'Admitted.') {
+            if (bullet && !hasBullet && tactic !== 'Qed.' && tactic !== 'Defined.' && tactic !== 'Admitted.') {
+              tactic = `${indent}${bullet} ${tactic}`;
+              tactic = `${indent}${bullet} ${tactic}`;
+            } else if (atLineStart) {
+            } else if (atLineStart) {
+              tactic = `${indent}${tactic}`;
+              tactic = `${indent}${tactic}`;
+            }
+            }
+
+
           } catch {
+          } catch {
+            // state query is best-effort for bullets
             // state query is best-effort for bullets
           }
           }
+          }
+          }
+
 
           // Speculative check: run tactic via Pétanque before editing the file.
+          // Speculative check: run tactic via Pétanque before editing the file.
+          // If it fails, report the Coq error without modifying the file.
           // If it fails, report the Coq error without modifying the file.
           // If it succeeds, show the resulting goals before committing.
+          // If it succeeds, show the resulting goals before committing.
+          let speculativeError: string | null = null;
           let speculativeError: string | null = null;
           let specGoals: GoalConfig<string> | null = null;
+          let specGoals: GoalConfig<string> | null = null;
+          let specFinished = false;
           let specFinished = false;
           try {
+          try {
+            const stateResult = await retryDocumentNotReady(() =>
             const stateResult = await retryDocumentNotReady(() =>
               lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+              lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                uri: doc.uri,
                 uri: doc.uri,
                 position: insPos,
+                position: insPos,
+                opts: { memo: false },
                 opts: { memo: false },
               })
+              })
+            );
             );
             const runResult = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+            const runResult = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+              st: stateResult.st,
               st: stateResult.st,
               tac: tactic,
+              tac: tactic,
               opts: { memo: false },
-            });
+              opts: { memo: false },
+            }, 60_000);
+            }, 60_000);
+            // Query resulting goals to preview what the tactic will do
             // Query resulting goals to preview what the tactic will do
             try {
+            try {
+              const g = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
               const g = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
                 st: runResult.st,
+                st: runResult.st,
+                opts: { compact: true },
                 opts: { compact: true },
               });
+              });
+              specGoals = g;
               specGoals = g;
               specFinished = runResult.proof_finished;
+              specFinished = runResult.proof_finished;
+            } catch {
             } catch {
               // goal query is best-effort
+              // goal query is best-effort
+            }
             }
           } catch (e: any) {
+          } catch (e: any) {
+            const msg = e?.message || String(e);
             const msg = e?.message || String(e);
             if (msg.includes('timeout') || msg.includes('Timeout')) {
+            if (msg.includes('timeout') || msg.includes('Timeout')) {
+              speculativeError = `proof check timed out — tactic may be too slow. Try a simpler tactic or split into steps.`;
               speculativeError = `proof check timed out — tactic may be too slow. Try a simpler tactic or split into steps.`;
             } else if (msg.includes('illegal begin of vernac') ||
+            } else if (msg.includes('illegal begin of vernac') ||
+                msg.includes('No proof-editing in progress') ||
                 msg.includes('No proof-editing in progress') ||
                 msg.includes('proof-editing') ||
+                msg.includes('proof-editing') ||
+                (tactic === 'Qed.' || tactic === 'Defined.' || tactic === 'Admitted.')) {
                 (tactic === 'Qed.' || tactic === 'Defined.' || tactic === 'Admitted.')) {
               // Allow Qed, Admitted, and proof-mode guard errors to pass through
+              // Allow Qed, Admitted, and proof-mode guard errors to pass through
+            } else if (msg.includes('No more subgoals') || msg.includes('No focused proof') ||
             } else if (msg.includes('No more subgoals') || msg.includes('No focused proof') ||
                        msg.includes('nothing to admit')) {
+                       msg.includes('nothing to admit')) {
+              // admit. with no open goal — reject
               // admit. with no open goal — reject
               speculativeError = msg;
+              speculativeError = msg;
+            } else {
             } else {
               speculativeError = msg;
+              speculativeError = msg;
+            }
             }
           }
+          }
+
 
           if (speculativeError) {
+          if (speculativeError) {
+            return reply(
             return reply(
               `${fileLine(file, proofLine)} — spec check FAILED: \"${tactic}\"\n  Coq says: ${speculativeError}`,
+              `${fileLine(file, proofLine)} — spec check FAILED: \"${tactic}\"\n  Coq says: ${speculativeError}`,
+              { applied: false, error: speculativeError, tactic }
               { applied: false, error: speculativeError, tactic }
             );
+            );
           }
+          }
+
 
           // Build preview from spec goals
+          // Build preview from spec goals
+          let specPreview = '';
           let specPreview = '';
           if (specGoals) {
+          if (specGoals) {
+            const nSpecGoals = specGoals.goals?.length || 0;
             const nSpecGoals = specGoals.goals?.length || 0;
             const specSummary = compactGoalSummary(specGoals);
+            const specSummary = compactGoalSummary(specGoals);
+            if (specFinished) {
             if (specFinished) {
               specPreview = '  (proof finished — Qed will be accepted)';
+              specPreview = '  (proof finished — Qed will be accepted)';
+            } else if (nSpecGoals === 1 && specGoals.goals[0]) {
             } else if (nSpecGoals === 1 && specGoals.goals[0]) {
               const g = specGoals.goals[0];
+              const g = specGoals.goals[0];
+              const hypsFormatted = (g.hyps || []).map((h: any) => {
               const hypsFormatted = (g.hyps || []).map((h: any) => {
                 const names = h.names ? h.names.join(', ') : (h.name || '?');
+                const names = h.names ? h.names.join(', ') : (h.name || '?');
+                const ty = (h.ty || '').replace(/\s+/g, ' ');
                 const ty = (h.ty || '').replace(/\s+/g, ' ');
                 return `  ${names} : ${ty}`;
+                return `  ${names} : ${ty}`;
+              }).join('\n');
               }).join('\n');
               const goalTy = (g.ty || '').replace(/\s+/g, ' ');
+              const goalTy = (g.ty || '').replace(/\s+/g, ' ');
+              specPreview = `  (after tactic — 1 goal):\n${hypsFormatted}\n  ⊢ ${goalTy}`;
               specPreview = `  (after tactic — 1 goal):\n${hypsFormatted}\n  ⊢ ${goalTy}`;
             } else if (nSpecGoals > 0) {
+            } else if (nSpecGoals > 0) {
+              specPreview = `  (${nSpecGoals} goal(s) after: ${specSummary})`;
               specPreview = `  (${nSpecGoals} goal(s) after: ${specSummary})`;
             } else {
+            } else {
+              specPreview = `  (${specSummary || 'no open goals'})`;
               specPreview = `  (${specSummary || 'no open goals'})`;
             }
-          }
-
-          // Insert tactic at insert point
-          let insertText: string;
-          let editEnd: Position;
-          if (oneLineSplit) {
-            insertText = `Proof.\n${tactic}\nAdmitted.\n`;
-            editEnd = { line: insPos.line + 1, character: 0 };
-          } else {
-            insertText = tactic.endsWith('\n') ? `${tactic}\n` : `${tactic}\n`;
-            const curLine = (docLines[insPos.line] || '').trim();
-            editEnd = (tactic === 'Qed.' && (curLine === 'Admitted.' || curLine === 'Qed.' || curLine === 'Defined.'))
-              ? { line: insPos.line, character: (docLines[insPos.line] || '').length }
-              : insPos;
-          }
-          const insertLines = insertText.split('\n');
-          const contentLines = insertLines.slice(0, -1); // exclude trailing empty from \n
-          const lastIdx = contentLines.length - 1;
-          const insertedLinesCount = contentLines.length;
-          const insertedUntil: Position = {
-            line: insPos.line + insertedLinesCount,
-            character: 0,
-          };
-          const nextTacticPosition: Position = {
-            line: insPos.line + lastIdx,
-            character: lastIdx === 0
-              ? (insPos.character || 0) + contentLines[0].length
-              : contentLines[lastIdx].length,
-          };
-          if (!historyAlreadyPushed) {
-            pushFileHistory(file, doc.text, currentProof.get(file));
-          }
-          const preEditVersion = doc.version;
-          const preEditText = doc.text;
-
-          const newText = docManager.applyEdits(doc.text, [
-            {
-              range: {
-                start: insPos,
-                end: editEnd,
-              },
-              newText: insertText,
-            },
-          ]);
-
-          await docManager.updateDocument(file, newText);
-          await docManager.saveDocument(file);
-
-          let goals = null;
-          if (follow_with_goals ?? true) {
-            try {
-              const updatedDoc = docManager.getDocument(file)!;
-              const goalsQueryPos = safePos({ line: insertedUntil.line, character: 0 }, updatedDoc.text);
-              const goalsResult = await retryDocumentNotReady(() =>
-                lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-                  textDocument: {
-                    uri: updatedDoc.uri,
-                    version: updatedDoc.version,
-                  },
-                  position: goalsQueryPos,
-                  pp_format: 'Str',
-                  mode: 'Prev',
-                })
-              );
-              if (goalsResult.error) {
-                console.error('Goals query error:', goalsResult.error);
-              }
-              goals = goalsResult;
-              
-            } catch (err) {
-              console.error('Failed to get goals:', err);
             }
           }
+          }
+
+
+          // Insert tactic at insert point
+          // Insert tactic at insert point
+          let insertText: string;
+          let insertText: string;
+          let editEnd: Position;
+          let editEnd: Position;
+          if (oneLineSplit) {
+          if (oneLineSplit) {
+            insertText = `Proof.\n${tactic}\nAdmitted.\n`;
+            insertText = `Proof.\n${tactic}\nAdmitted.\n`;
+            editEnd = { line: insPos.line + 1, character: 0 };
+            editEnd = { line: insPos.line + 1, character: 0 };
+          } else {
+          } else {
+            insertText = tactic.endsWith('\n') ? `${tactic}\n` : `${tactic}\n`;
+            insertText = tactic.endsWith('\n') ? `${tactic}\n` : `${tactic}\n`;
+            const curLine = (docLines[insPos.line] || '').trim();
+            const curLine = (docLines[insPos.line] || '').trim();
+            editEnd = (tactic === 'Qed.' && (curLine === 'Admitted.' || curLine === 'Qed.' || curLine === 'Defined.'))
+            editEnd = (tactic === 'Qed.' && (curLine === 'Admitted.' || curLine === 'Qed.' || curLine === 'Defined.'))
+              ? { line: insPos.line, character: (docLines[insPos.line] || '').length }
+              ? { line: insPos.line, character: (docLines[insPos.line] || '').length }
+              : insPos;
+              : insPos;
+          }
+          }
+          const insertLines = insertText.split('\n');
+          const insertLines = insertText.split('\n');
+          const contentLines = insertLines.slice(0, -1); // exclude trailing empty from \n
+          const contentLines = insertLines.slice(0, -1); // exclude trailing empty from \n
+          const lastIdx = contentLines.length - 1;
+          const lastIdx = contentLines.length - 1;
+          const insertedLinesCount = contentLines.length;
+          const insertedLinesCount = contentLines.length;
+          const insertedUntil: Position = {
+          const insertedUntil: Position = {
+            line: insPos.line + insertedLinesCount,
+            line: insPos.line + insertedLinesCount,
+            character: 0,
+            character: 0,
+          };
+          };
+          const nextTacticPosition: Position = {
+          const nextTacticPosition: Position = {
+            line: insPos.line + lastIdx,
+            line: insPos.line + lastIdx,
+            character: lastIdx === 0
+            character: lastIdx === 0
+              ? (insPos.character || 0) + contentLines[0].length
+              ? (insPos.character || 0) + contentLines[0].length
+              : contentLines[lastIdx].length,
+              : contentLines[lastIdx].length,
+          };
+          };
+          if (!historyAlreadyPushed) {
+          if (!historyAlreadyPushed) {
+            pushFileHistory(file, doc.text, currentProof.get(file));
+            pushFileHistory(file, doc.text, currentProof.get(file));
+          }
+          }
+          const preEditVersion = doc.version;
+          const preEditVersion = doc.version;
+          const preEditText = doc.text;
+          const preEditText = doc.text;
+
+
+          const newText = docManager.applyEdits(doc.text, [
+          const newText = docManager.applyEdits(doc.text, [
+            {
+            {
+              range: {
+              range: {
+                start: insPos,
+                start: insPos,
+                end: editEnd,
+                end: editEnd,
+              },
+              },
+              newText: insertText,
+              newText: insertText,
+            },
+            },
+          ]);
+          ]);
+
+
+          await docManager.updateDocument(file, newText);
+          await docManager.updateDocument(file, newText);
+          await flushAndWait(file);
+          await flushAndWait(file);
+
+
+          let goals = null;
+          let goals = null;
+          if (follow_with_goals ?? true) {
+          if (follow_with_goals ?? true) {
+            try {
+            try {
+              const updatedDoc = docManager.getDocument(file)!;
+              const updatedDoc = docManager.getDocument(file)!;
+              const goalsQueryPos = safePos({ line: insertedUntil.line, character: 0 }, updatedDoc.text);
+              const goalsQueryPos = safePos({ line: insertedUntil.line, character: 0 }, updatedDoc.text);
+              const goalsResult = await retryDocumentNotReady(() =>
+              const goalsResult = await retryDocumentNotReady(() =>
+                lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                  textDocument: {
+                  textDocument: {
+                    uri: updatedDoc.uri,
+                    uri: updatedDoc.uri,
+                    version: updatedDoc.version,
+                    version: updatedDoc.version,
+                  },
+                  },
+                  position: goalsQueryPos,
+                  position: goalsQueryPos,
+                  pp_format: 'Str',
+                  pp_format: 'Str',
+                  mode: 'Prev',
+                  mode: 'Prev',
+                })
+                })
+              );
+              );
+              if (goalsResult.error) {
+              if (goalsResult.error) {
+                console.error('Goals query error:', goalsResult.error);
+                console.error('Goals query error:', goalsResult.error);
+              }
+              }
+              goals = goalsResult;
+              goals = goalsResult;
+              
+              
+            } catch (err) {
+            } catch (err) {
+              console.error('Failed to get goals:', err);
+              console.error('Failed to get goals:', err);
+            }
+            }
+          }
+          }
+
 
           // If goals query failed, roll back the tactic insertion.
+          // If goals query failed, roll back the tactic insertion.
+          // A slow tactic may have been inserted but the state is unknown.
           // A slow tactic may have been inserted but the state is unknown.
           const gcAfter = goals?.goals;
+          const gcAfter = goals?.goals;
+          if (!gcAfter && !oneLineSplit) {
           if (!gcAfter && !oneLineSplit) {
             await docManager.updateDocument(file, preEditText);
-            await docManager.saveDocument(file);
+            await docManager.updateDocument(file, preEditText);
+            await flushAndWait(file);
+            await flushAndWait(file);
+            return reply(
             return reply(
               `${fileLine(file, position.line)} — inserted "${tactic.trim()}" but goals query failed — tactic rolled back`,
+              `${fileLine(file, position.line)} — inserted "${tactic.trim()}" but goals query failed — tactic rolled back`,
+              { applied: false, error: 'goals query failed after insertion', rolled_back: true }
               { applied: false, error: 'goals query failed after insertion', rolled_back: true }
             );
-          }
-
-          // If the tactic produced Coq errors (e.g. mid-line reference error
-          // in a multi-tactic one-liner), roll back and report the error.
-          const hasErrors = (goals?.messages || []).some((m: any) => m.level === 1);
-          if (hasErrors) {
-            const errMsg = (goals?.messages || []).filter((m: any) => m.level === 1).map((m: any) => m.text || m.message).join('; ');
-            await docManager.updateDocument(file, preEditText);
-            await docManager.saveDocument(file);
-            return reply(
-              `${fileLine(file, position.line)} — tactic error — rolled back\n  Coq says: ${errMsg}`,
-              { applied: false, error: errMsg, rolled_back: true }
             );
           }
-          const nFocus = gcAfter?.goals?.length ?? 0;
-          const nBg = (gcAfter?.stack || []).reduce(
-            (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
-          );
-          const nGivenUp = gcAfter?.given_up?.length ?? 0;
-
-          const hint = gcAfter ? nextHint(gcAfter) : '';
-
-          const stateMsg = goals?.error
-            ? `error: ${goals?.error}`
-            : oneLineSplit ? 'inserted'
-            : gcAfter === undefined || gcAfter === null
-            ? 'goals query failed'
-            : nFocus === 0 && nBg === 0 ? 'done — Qed applied'
-            : nFocus === 0 && nGivenUp > 0 ? `bullet closed (${nGivenUp} admitted), ${nBg} in background`
-            : nFocus === 0 ? `bullet closed, ${nBg} in background`
-            : nBg > 0 ? `${nFocus} at focus, ${nBg} in background (bullet open)`
-            : `${nFocus} goal(s)`;
-
-          // Auto-close: when all focused + background goals are done,
-          // replace Admitted. with Qed.  We deliberately don't block on
-          // nGivenUp because the petanque API can report false positives
-          // for given-up goals (e.g. { } blocks after rewrite).
-          // The real gate is applyAutoQed, which checks for text-level
-          // admit. lines inside the proof.
-          const canAutoClose = nFocus === 0 && nBg === 0 &&
-            gcAfter !== undefined && gcAfter !== null && !hasErrors;
-          if (canAutoClose) {
-            try {
-              const currentDoc = docManager.getDocument(file)!;
-              const { text: qedText, applied } = applyAutoQed(currentDoc.text, name);
-              if (applied) {
-                await docManager.updateDocument(file, qedText);
-                await docManager.saveDocument(file);
-              }
-            } catch { /* best-effort */ }
           }
 
+
+          // If the tactic produced Coq errors (e.g. mid-line reference error
+          // If the tactic produced Coq errors (e.g. mid-line reference error
+          // in a multi-tactic one-liner), roll back and report the error.
+          // in a multi-tactic one-liner), roll back and report the error.
+          const hasErrors = (goals?.messages || []).some((m: any) => m.level === 1);
+          const hasErrors = (goals?.messages || []).some((m: any) => m.level === 1);
+          if (hasErrors) {
+          if (hasErrors) {
+            const errMsg = (goals?.messages || []).filter((m: any) => m.level === 1).map((m: any) => m.text || m.message).join('; ');
+            const errMsg = (goals?.messages || []).filter((m: any) => m.level === 1).map((m: any) => m.text || m.message).join('; ');
+            await docManager.updateDocument(file, preEditText);
+            await docManager.updateDocument(file, preEditText);
+            await flushAndWait(file);
+            await flushAndWait(file);
+            return reply(
+            return reply(
+              `${fileLine(file, position.line)} — tactic error — rolled back\n  Coq says: ${errMsg}`,
+              `${fileLine(file, position.line)} — tactic error — rolled back\n  Coq says: ${errMsg}`,
+              { applied: false, error: errMsg, rolled_back: true }
+              { applied: false, error: errMsg, rolled_back: true }
+            );
+            );
+          }
+          }
+          const nFocus = gcAfter?.goals?.length ?? 0;
+          const nFocus = gcAfter?.goals?.length ?? 0;
+          const nBg = (gcAfter?.stack || []).reduce(
+          const nBg = (gcAfter?.stack || []).reduce(
+            (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
+            (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
+          );
+          );
+          const nGivenUp = gcAfter?.given_up?.length ?? 0;
+          const nGivenUp = gcAfter?.given_up?.length ?? 0;
+
+
+          const hint = gcAfter ? nextHint(gcAfter) : '';
+          const hint = gcAfter ? nextHint(gcAfter) : '';
+
+
+          const stateMsg = goals?.error
+          const stateMsg = goals?.error
+            ? `error: ${goals?.error}`
+            ? `error: ${goals?.error}`
+            : oneLineSplit ? 'inserted'
+            : oneLineSplit ? 'inserted'
+            : gcAfter === undefined || gcAfter === null
+            : gcAfter === undefined || gcAfter === null
+            ? 'goals query failed'
+            ? 'goals query failed'
+            : nFocus === 0 && nBg === 0 ? 'done — Qed applied'
+            : nFocus === 0 && nBg === 0 ? 'done — Qed applied'
+            : nFocus === 0 && nGivenUp > 0 ? `bullet closed (${nGivenUp} admitted), ${nBg} in background`
+            : nFocus === 0 && nGivenUp > 0 ? `bullet closed (${nGivenUp} admitted), ${nBg} in background`
+            : nFocus === 0 ? `bullet closed, ${nBg} in background`
+            : nFocus === 0 ? `bullet closed, ${nBg} in background`
+            : nBg > 0 ? `${nFocus} at focus, ${nBg} in background (bullet open)`
+            : nBg > 0 ? `${nFocus} at focus, ${nBg} in background (bullet open)`
+            : `${nFocus} goal(s)`;
+            : `${nFocus} goal(s)`;
+
+
+          // Auto-close: when all focused + background goals are done,
+          // Auto-close: when all focused + background goals are done,
+          // replace Admitted. with Qed.  We deliberately don't block on
+          // replace Admitted. with Qed.  We deliberately don't block on
+          // nGivenUp because the petanque API can report false positives
+          // nGivenUp because the petanque API can report false positives
+          // for given-up goals (e.g. { } blocks after rewrite).
+          // for given-up goals (e.g. { } blocks after rewrite).
+          // The real gate is applyAutoQed, which checks for text-level
+          // The real gate is applyAutoQed, which checks for text-level
+          // admit. lines inside the proof.
+          // admit. lines inside the proof.
+          const canAutoClose = nFocus === 0 && nBg === 0 &&
+          const canAutoClose = nFocus === 0 && nBg === 0 &&
+            gcAfter !== undefined && gcAfter !== null && !hasErrors;
+            gcAfter !== undefined && gcAfter !== null && !hasErrors;
+          if (canAutoClose) {
+          if (canAutoClose) {
+            try {
+            try {
+              const currentDoc = docManager.getDocument(file)!;
+              const currentDoc = docManager.getDocument(file)!;
+              const { text: qedText, applied } = applyAutoQed(currentDoc.text, name);
+              const { text: qedText, applied } = applyAutoQed(currentDoc.text, name);
+              if (applied) {
+              if (applied) {
+                await docManager.updateDocument(file, qedText);
+                await docManager.updateDocument(file, qedText);
+                await flushAndWait(file);
+                await flushAndWait(file);
+              }
+              }
+            } catch { /* best-effort */ }
+            } catch { /* best-effort */ }
+          }
+          }
+
+
+          // Extract proof script for context
           // Extract proof script for context
           const scriptLines: string[] = [];
+          const scriptLines: string[] = [];
           {
+          {
+            const fLines = doc.text.split('\n');
             const fLines = doc.text.split('\n');
             let pl = insertedUntil.line;
             for (; pl >= 0; pl--) {
@@ -2109,6 +3002,13 @@ async function main() {
             const range = result.completed?.range;
             const loc = range ? `L${range.start.line}-L${range.end.line}` : '?';
 
+            // Error diagnostics are the only truthful verification signal:
+            // coq-lsp checks PAST errors, so completed.status says "Yes" even
+            // when proofs are broken. Qed./Admitted. text alone proves nothing.
+            const errDiags = lspClient.getDiagnostics(doc.uri)
+              .filter(d => (d.severity ?? 1) === 1)
+              .sort((a, b) => a.range.start.line - b.range.start.line);
+
             // Count Admitted. occurrences and locate them
             const docLines = doc.text.split('\n');
             let admittedCount = 0;
@@ -2180,6 +3080,15 @@ async function main() {
                 }
                 if (isDef && status === '?') status = 'open';
                 if (!isDef && !isProof) status = 'open';
+                // Error diagnostics override textual status — a "Qed." whose
+                // body has an error is NOT proved.
+                const itemErrs = errDiags.filter(
+                  d => d.range.start.line >= i && d.range.start.line <= endLine
+                );
+                if (itemErrs.length > 0) {
+                  const m = (itemErrs[0].message || '').replace(/\s+/g, ' ');
+                  status = `ERROR L${itemErrs[0].range.start.line + 1}: ${m.length > 80 ? m.slice(0, 77) + '…' : m}`;
+                }
                 const rangeStr = `L${i}-L${endLine}`;
                 let entry: string;
                 if (isDef) {
@@ -2229,9 +3138,19 @@ async function main() {
                 + '\n' + pageItems.map(it => it.text).join('\n')
               : (items.length > 0 ? `\n${items.length} items total (use count parameter to paginate)` : '');
 
+            const errInfo = errDiags.length > 0
+              ? `, ${errDiags.length} ERROR(S)` +
+                '\n-- errors ----------\n' +
+                errDiags.slice(0, 10).map(d => {
+                  const m = (d.message || '').replace(/\s+/g, ' ');
+                  return `  L${d.range.start.line + 1}: ${m.length > 160 ? m.slice(0, 157) + '…' : m}`;
+                }).join('\n') +
+                (errDiags.length > 10 ? `\n  … ${errDiags.length - 10} more` : '')
+              : '';
+
             return reply(
-              `${fileLine(file, 0)} — ${result.completed?.status || 'unknown'}, ${spanCount} spans (${loc}) [ws: ${activeWorkspaceRoot}]` + admittedInfo + summary,
-              { file, completed: result.completed?.status, span_count: spanCount, completed_range: loc, admitted: admittedCount, admitted_lines: admittedAt, success: true, workspace_root: activeWorkspaceRoot }
+              `${fileLine(file, 0)} — ${errDiags.length > 0 ? 'FAILING' : (result.completed?.status || 'unknown')}, ${spanCount} spans (${loc}) [ws: ${activeWorkspaceRoot}]` + admittedInfo + errInfo + summary,
+              { file, completed: result.completed?.status, span_count: spanCount, completed_range: loc, admitted: admittedCount, admitted_lines: admittedAt, errors: errDiags.length, success: errDiags.length === 0, workspace_root: activeWorkspaceRoot }
             );
           } catch (error) {
             return err(
@@ -2271,12 +3190,24 @@ async function main() {
               return spanLine >= range.start.line && spanLine <= range.end.line;
             }) || [];
 
-            // Check if any spans in the range have errors (we'll need to get diagnostics)
-            // For now, just return span information
             const spanCount = targetSpans.length;
+
+            // Error diagnostics within the requested range
+            const rangeErrs = lspClient.getDiagnostics(doc.uri)
+              .filter(d => (d.severity ?? 1) === 1)
+              .filter(d => d.range.start.line >= range.start.line && d.range.start.line <= range.end.line)
+              .sort((a, b) => a.range.start.line - b.range.start.line);
+            const errText = rangeErrs.length > 0
+              ? '\n' + rangeErrs.slice(0, 10).map(d => {
+                  const m = (d.message || '').replace(/\s+/g, ' ');
+                  return `  ERROR L${d.range.start.line + 1}: ${m.length > 160 ? m.slice(0, 157) + '…' : m}`;
+                }).join('\n')
+              : '';
+
             return reply(
-              `${fileLine(file, range.start.line)}-${fileLine(file, range.end.line)} — ${spanCount} span(s), overall: ${result.completed?.status || 'unknown'}`,
-              { file, range: `L${range.start.line}-L${range.end.line}`, span_count: spanCount, overall_completed: result.completed?.status, success: true }
+              `${fileLine(file, range.start.line)}-${fileLine(file, range.end.line)} — ${spanCount} span(s), ` +
+              `${rangeErrs.length > 0 ? `${rangeErrs.length} ERROR(S)` : 'no errors'}, overall: ${result.completed?.status || 'unknown'}` + errText,
+              { file, range: `L${range.start.line}-L${range.end.line}`, span_count: spanCount, errors: rangeErrs.length, overall_completed: result.completed?.status, success: rangeErrs.length === 0 }
             );
           } catch (error) {
             return err(
@@ -2669,105 +3600,200 @@ async function main() {
 
         case 'stratify': {
           const { file, name, skeleton, portfolio, cases_from, write, attempt_timeout_ms } = args as {
-            file: string; name: string; skeleton: string; portfolio: string[];
-            cases_from?: string; write?: boolean; attempt_timeout_ms?: number;
+            file: string;
+            name: string;
+            skeleton: string;
+            portfolio: string[];
+            cases_from?: string;
+            write?: boolean;
+            attempt_timeout_ms?: number;
           };
+
           currentProof.set(file, name);
-          const attemptTimeout = attempt_timeout_ms ?? 10_000;
+          const attemptTimeout = attempt_timeout_ms ?? 10000;
+
+          // Auto-period on the skeleton
           let skel = skeleton.trim();
           if (skel.length > 0 && !skel.endsWith('.')) skel += '.';
-          const entries = (portfolio || []).map(p => { let s = p.trim(); while (s.endsWith('.')) s = s.slice(0, -1).trim(); return s; }).filter(s => s.length > 0);
+
+          // Portfolio entries: strip trailing periods (they get wrapped in solve [...])
+          const entries = (portfolio || []).map(p => {
+            let s = p.trim();
+            while (s.endsWith('.')) s = s.slice(0, -1).trim();
+            return s;
+          }).filter(s => s.length > 0);
           if (entries.length === 0) throw new Error('stratify: portfolio is empty');
 
           const doc = await ensureDocumentOpened(file);
           const docLines = doc.text.split('\n');
           const bounds = proofBounds(docLines, name);
           if (!bounds) throw new Error(`Proof not found or unterminated: "${name}"`);
-          const pos = insertPosition(doc.text, { line: bounds.proofLine, character: 0 });
+          // Snap at the end of the last tactic line (NOT the Admitted. line —
+          // that lands outside proof mode: "illegal begin of vernac").
+          const { snapLine, snapChar } = admitSnapPosition(docLines, bounds.endLine, bounds.proofLine);
+          const position: Position = { line: snapLine, character: snapChar };
           const uri = doc.uri;
 
+          // Base state at the proof cursor
           const baseState = await retryDocumentNotReady(() =>
             lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
-              uri, position: pos, opts: { memo: true, hash: true },
+              uri, position, opts: { memo: true, hash: true },
             })
           );
           const baseSt = await runPendingImports(uri, baseState.st);
+
+          // 1. Run the skeleton speculatively
           let skelRun: RunResult<number>;
-          try { skelRun = await lspClient.sendRequest<RunResult<number>>('petanque/run', { st: baseSt, tac: skel, opts: { memo: true, hash: true } }); }
-          catch (e: any) { return err(`stratify ${name}: skeleton failed: ${e?.message ?? e}`); }
-          const skelGoals = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', { st: skelRun.st, opts: { compact: true } });
+          try {
+            skelRun = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+              st: baseSt, tac: skel, opts: { memo: true, hash: true },
+            });
+          } catch (e: any) {
+            return err(`stratify ${name}: skeleton failed: ${e?.message ?? e}`);
+          }
+          const skelGoals = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+            st: skelRun.st, opts: { compact: true },
+          });
           const goals = skelGoals.goals || [];
           const nGoals = goals.length;
 
-          // Constructor names for labels (best-effort)
+          // 2. Constructor names for case labels (optional, best-effort)
+          function parseConstructorNames(printOutput: string): string[] {
+            const idx = printOutput.indexOf(':=');
+            if (idx < 0) return [];
+            const body = printOutput.slice(idx + 2);
+            const names: string[] = [];
+            const first = body.match(/^\s*([A-Za-z_][A-Za-z0-9_']*)\s*:/);
+            if (first) names.push(first[1]);
+            const re = /\n\s*\|\s*([A-Za-z_][A-Za-z0-9_']*)\s*:/g;
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(body)) !== null) names.push(m[1]);
+            return names;
+          }
           let caseNames: string[] = [];
           if (cases_from) {
             try {
-              const pr = await lspClient.sendRequest<RunResult<number>>('petanque/run', { st: baseSt, tac: `Print ${cases_from}.`, opts: { memo: true, hash: false } });
-              const text = (pr.feedback || []).map(([, m]: any) => m).join('\n');
-              const idx = text.indexOf(':=');
-              if (idx >= 0) {
-                const body = text.slice(idx + 2);
-                const first = body.match(/^\s*([A-Za-z_][A-Za-z0-9_']*)\s*:/);
-                if (first) caseNames.push(first[1]);
-                const re = /\n\s*\|\s*([A-Za-z_][A-Za-z0-9_']*)\s*:/g;
-                let m: RegExpExecArray | null;
-                while ((m = re.exec(body)) !== null) caseNames.push(m[1]);
-              }
-            } catch {}
+              const pr = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                st: baseSt, tac: `Print ${cases_from}.`, opts: { memo: true, hash: false },
+              });
+              const text = (pr.feedback || []).map(([, msg]) => msg).join('\n');
+              caseNames = parseConstructorNames(text);
+            } catch { /* fall back to positional labels */ }
           }
           const labelled = caseNames.length === nGoals;
           const nameOf = (i: number) => labelled ? caseNames[i] : `case_${i + 1}`;
 
-          // Portfolio: each subgoal independently, via goal selectors
+          // 3. Portfolio loop: each subgoal independently, via goal selectors,
+          //    against the same memoized post-skeleton state.
           const wins: Array<number | null> = [];
           for (let i = 0; i < nGoals; i++) {
             let win: number | null = null;
             for (let k = 0; k < entries.length; k++) {
               const sel = `${i + 1}: solve [ ${entries[k]} ].`;
               try {
-                await lspClient.sendRequest<RunResult<number>>('petanque/run', { st: skelRun.st, tac: sel, opts: { memo: true, hash: true } }, attemptTimeout);
-                win = k; break;
-              } catch {}
+                await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                  st: skelRun.st, tac: sel, opts: { memo: true, hash: true },
+                }, attemptTimeout);
+                win = k;
+                break;
+              } catch { /* next portfolio entry */ }
             }
             wins.push(win);
           }
 
-          // Materialize
+          // 4. Materialize: skeleton + one bullet per case
           const survivors: number[] = [];
           const bodyLines: string[] = ['  ' + skel];
           for (let i = 0; i < nGoals; i++) {
-            if (wins[i] !== null) bodyLines.push(`  - (* ${nameOf(i)} *) solve [ ${entries[wins[i]!]} ].`);
-            else { survivors.push(i); bodyLines.push(`  - (* ${nameOf(i)} *) admit.`); }
-          }
-
-          let written = false;
-          if (write !== false) {
-            pushFileHistory(file, doc.text, currentProof.get(file));
-            const newText = docManager.applyEdits(doc.text, [{ range: { start: { line: pos.line, character: 0 }, end: { line: pos.line, character: 0 } }, newText: bodyLines.join('\n') + '\n' }]);
-            await docManager.updateDocument(file, newText);
-            await docManager.saveDocument(file);
-            written = true;
-            if (survivors.length === 0) {
-              try {
-                const cd = docManager.getDocument(file)!;
-                const { text: qt, applied } = applyAutoQed(cd.text, name);
-                if (applied) { await docManager.updateDocument(file, qt); await docManager.saveDocument(file); }
-              } catch {}
+            if (wins[i] !== null) {
+              bodyLines.push(`  - (* ${nameOf(i)} *) solve [ ${entries[wins[i]!]} ].`);
+            } else {
+              survivors.push(i);
+              bodyLines.push(`  - (* ${nameOf(i)} *) admit.`);
             }
           }
 
-          const nSolved = nGoals - survivors.length;
-          const parts: string[] = [];
-          parts.push(`stratify ${name}: skeleton → ${nGoals} goal(s)${cases_from ? ` (cases from ${cases_from})` : ''}, solved ${nSolved}/${nGoals}`);
-          for (let j = 0; j < survivors.length; j++) {
-            const i = survivors[j];
-            const ty = ((goals[i] as any)?.ty || '').replace(/\s+/g, ' ').slice(0, 200);
-            parts.push(`  survivor: ${nameOf(i)} ⊢ ${ty}`);
+          let written = false;
+          let admitReport: Array<{ hash: string; line: number; goal: string; hyps: string }> = [];
+          if (write !== false) {
+            pushFileHistory(file, doc.text, currentProof.get(file));
+            const insertText = bodyLines.join('\n') + '\n';
+            const newText = docManager.applyEdits(doc.text, [{
+              range: {
+                start: { line: bounds.endLine, character: 0 },
+                end: { line: bounds.endLine, character: 0 },
+              },
+              newText: insertText,
+            }]);
+            await docManager.updateDocument(file, newText);
+            await docManager.saveDocument(file);
+            written = true;
+
+            if (survivors.length === 0) {
+              try {
+                const currentDoc = docManager.getDocument(file)!;
+                const { text: qedText, applied } = applyAutoQed(currentDoc.text, name);
+                if (applied) {
+                  await docManager.updateDocument(file, qedText);
+                  await docManager.saveDocument(file);
+                }
+              } catch { /* best-effort */ }
+            } else {
+              try {
+                const currentDoc = docManager.getDocument(file)!;
+                const curLines = currentDoc.text.split('\n');
+                const bounds = proofBounds(curLines, name);
+                if (bounds) admitReport = await queryAdmitHashes(currentDoc, curLines, bounds);
+              } catch { /* hashes are best-effort; survivors still listed */ }
+            }
           }
-          if (survivors.length === 0 && written) parts.push('all cases closed — Qed applied');
-          else if (survivors.length > 0) parts.push('next: insert_tactic with admit_hash per survivor, or edit manually');
-          return reply(parts.join('\n'), { written, solved: nSolved, total: nGoals, survivors: survivors.map(i => nameOf(i)) });
+
+          // 5. Report: compact, conclusion-only
+          const nSolved = nGoals - survivors.length;
+          const byPortfolio = new Map<number, string[]>();
+          for (let i = 0; i < nGoals; i++) {
+            if (wins[i] !== null) {
+              const arr = byPortfolio.get(wins[i]!) ?? [];
+              arr.push(nameOf(i));
+              byPortfolio.set(wins[i]!, arr);
+            }
+          }
+          const parts: string[] = [];
+          let header = `stratify ${name}: skeleton → ${nGoals} goal(s)`;
+          if (labelled) header += ` (cases from ${cases_from})`;
+          else if (cases_from) header += ` (warning: ${cases_from} has ${caseNames.length} constructors ≠ ${nGoals} goals — positional labels used)`;
+          parts.push(header);
+          if (nGoals === 0) {
+            parts.push(skelRun.proof_finished || written ? 'skeleton closed the proof' : 'skeleton left no goals');
+          } else {
+            parts.push(`solved ${nSolved}/${nGoals}`);
+            for (const [k, names] of [...byPortfolio.entries()].sort((a, b) => a[0] - b[0])) {
+              parts.push(`  ${names.join(', ')} ← portfolio[${k}]`);
+            }
+            if (survivors.length > 0) {
+              parts.push(`survivors ${survivors.length}${written ? ' (written as labelled admits)' : ' (dry run — nothing written)'}:`);
+              for (let j = 0; j < survivors.length; j++) {
+                const i = survivors[j];
+                const ty = ((goals[i] as any)?.ty || '').replace(/\s+/g, ' ');
+                const trunc = ty.length > 200 ? ty.slice(0, 197) + '…' : ty;
+                const hash = admitReport[j]?.hash ? `[${admitReport[j].hash}] ` : '';
+                const line = admitReport[j]?.line ? ` (L${admitReport[j].line})` : '';
+                parts.push(`  ${hash}${nameOf(i)}${line} ⊢ ${trunc}`);
+              }
+              if (admitReport.length > 0) {
+                parts.push('next: insert_tactic with admit_hash=<hash>, or try_step per survivor');
+              }
+            } else if (written) {
+              parts.push('all cases closed — Qed applied');
+            }
+          }
+          return reply(parts.join('\n'), {
+            written,
+            solved: nSolved,
+            total: nGoals,
+            survivors: survivors.map(i => nameOf(i)),
+            admit_hashes: admitReport.map(a => a.hash),
+          });
         }
 
         case 'require_lib': {
@@ -3153,6 +4179,318 @@ async function main() {
         }
 
 
+
+        case 'list_holes': {
+          const { file, name } = args as { file: string; name: string };
+          currentProof.set(file, name);
+
+          const ctxDoc = await ensureDocumentOpened(file);
+          const ctxLines = ctxDoc.text.split('\n');
+          const ctxBounds = proofBounds(ctxLines, name);
+          if (!ctxBounds) throw new Error(`Proof not found: "${name}"`);
+          const ctxCloser = (ctxLines[ctxBounds.endLine] || '').trim();
+          if (ctxCloser !== 'Admitted.') {
+            return reply(
+              `${fileLine(file, ctxBounds.proofLine)} — proof "${name}" is closed (${ctxCloser}) — no holes`,
+              { holes: [], closed: true }
+            );
+          }
+
+          const ctx = await refinementContext(file, name);
+          const unnamed = ctx.holes.filter(h => h.auto);
+          const hint = ctx.holes.length === 0
+            ? 'next: no holes — proof body complete; Qed should apply.'
+            : unnamed.length === ctx.holes.length && proofBodyEmpty(ctx.docLines, ctx.bounds.proofLine, ctx.bounds.endLine)
+            ? 'next: virgin proof — use refine_proof to install a skeleton with named ?[holes].'
+            : `next: fill_hole with one of: ${ctx.holes.filter(h => !h.shelved).map(h => h.name).join(', ')}`;
+          return reply(
+            `${fileLine(file, ctx.bounds.proofLine)} — ${ctx.holes.length} hole(s) in "${name}"\n${formatHoleTable(ctx.holes)}\n\n${hint}`,
+            { holes: ctx.holes }
+          );
+        }
+
+        case 'refine_proof': {
+          const { file, name, term, replace } = args as {
+            file: string; name: string; term: string; replace?: boolean;
+          };
+          currentProof.set(file, name);
+
+          let doc = await ensureDocumentOpened(file);
+          let docLines = doc.text.split('\n');
+          let bounds = proofBounds(docLines, name);
+          if (!bounds) throw new Error(`Proof not found: "${name}"`);
+          const closer = (docLines[bounds.endLine] || '').trim();
+          if (closer !== 'Admitted.') {
+            throw new Error(`Proof "${name}" is already closed (${closer}) — use reset_proof first`);
+          }
+
+          // Wipe existing body if replace requested
+          if (!proofBodyEmpty(docLines, bounds.proofLine, bounds.endLine)) {
+            if (!replace) {
+              throw new Error(`Proof "${name}" already has a body — pass replace: true to overwrite, or use fill_hole to continue it`);
+            }
+            pushFileHistory(file, doc.text, name);
+            const wiped = docManager.applyEdits(doc.text, [{
+              range: {
+                start: { line: bounds.proofLine + 1, character: 0 },
+                end: { line: bounds.endLine, character: 0 },
+              },
+              newText: '',
+            }]);
+            await docManager.updateDocument(file, wiped);
+            await docManager.saveDocument(file);
+            await resyncFile(file);
+            doc = docManager.getDocument(file)!;
+            docLines = doc.text.split('\n');
+            bounds = proofBounds(docLines, name)!;
+          }
+
+          let t = term.trim().replace(/\.\s*$/, '');
+          if (/^(unshelve\s+)?refine\b/.test(t)) {
+            throw new Error('Pass the bare term — refine_proof wraps it in `unshelve refine (…).` itself');
+          }
+          const script = `unshelve refine (${t}).`;
+
+          // Spec check from the end of the Proof. line
+          const snapPos: Position = {
+            line: bounds.proofLine,
+            character: (docLines[bounds.proofLine] || '').length,
+          };
+          const stateR = await retryDocumentNotReady(() =>
+            lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+              uri: doc.uri, position: snapPos, opts: { memo: false },
+            })
+          );
+          let runR: RunResult<number>;
+          try {
+            runR = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+              st: stateR.st, tac: script, opts: { memo: false },
+            });
+          } catch (e: any) {
+            const msg = e?.message || String(e);
+            return reply(
+              `${fileLine(file, bounds.proofLine)} — refine_proof FAILED (file untouched)\n  Coq says: ${msg}`,
+              { applied: false, error: msg }
+            );
+          }
+
+          // Restore the naming invariant for any auto-named surfaced holes
+          let holesNow = await holesForState(runR.st);
+          const renameScript = buildRenameScript(holesNow, 'g');
+          if (renameScript) {
+            try {
+              const rn = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                st: runR.st, tac: renameScript, opts: { memo: false },
+              });
+              runR = rn;
+              holesNow = await holesForState(rn.st);
+            } catch (e: any) {
+              return reply(
+                `${fileLine(file, bounds.proofLine)} — refine_proof FAILED during hole renaming (file untouched)\n  Coq says: ${e?.message || String(e)}`,
+                { applied: false, error: e?.message || String(e) }
+              );
+            }
+          }
+
+          // Commit: insert after Proof.
+          const insertText = renameScript
+            ? `  ${script}\n  ${renameScript}\n`
+            : `  ${script}\n`;
+          pushFileHistory(file, doc.text, name);
+          const newText = docManager.applyEdits(doc.text, [{
+            range: {
+              start: { line: bounds.proofLine + 1, character: 0 },
+              end: { line: bounds.proofLine + 1, character: 0 },
+            },
+            newText: insertText,
+          }]);
+          await docManager.updateDocument(file, newText);
+          await docManager.saveDocument(file);
+          await resyncFile(file);
+
+          // Re-query from the file — display only. Auto-Qed is gated on the
+          // authoritative proof_finished flag from the spec run, never on a
+          // (possibly flaky) empty re-query.
+          const skelFinished = !!runR.proof_finished;
+          let remaining: HoleEntry[] = skelFinished ? [] : holesNow;
+          if (!skelFinished) {
+            try {
+              const c2 = await refinementContext(file, name);
+              if (c2.holes.length > 0) remaining = c2.holes;
+            } catch { /* keep speculative table */ }
+          }
+
+          let qedMsg = '';
+          if (skelFinished) {
+            try {
+              const cur = docManager.getDocument(file)!;
+              const { text: qedText, applied } = applyAutoQed(cur.text, name);
+              if (applied) {
+                await docManager.updateDocument(file, qedText);
+                await docManager.saveDocument(file);
+                await resyncFile(file);
+                qedMsg = ' — Qed applied';
+              }
+            } catch { /* best-effort */ }
+          }
+
+          const renameMsg = renameScript
+            ? `\n  (auto-renamed unnamed holes: ${renameScript})`
+            : '';
+          return reply(
+            `${fileLine(file, bounds.proofLine)} — skeleton installed for "${name}"${qedMsg}${renameMsg}\n` +
+            `holes (${remaining.length}):\n${formatHoleTable(remaining)}` +
+            (remaining.length > 0
+              ? `\n\nnext: fill_hole with one of: ${remaining.filter(h => !h.shelved).map(h => h.name).join(', ')}`
+              : ''),
+            { applied: true, holes: remaining }
+          );
+        }
+
+        case 'fill_hole':
+        case 'try_fill': {
+          const commit = name === 'fill_hole';
+          const { file, name: proofName, hole: holeRaw, script: rawScript } = args as {
+            file: string; name: string; hole: string; script: string;
+          };
+          currentProof.set(file, proofName);
+
+          const hole = normalizeHoleName(holeRaw);
+          const ctx = await refinementContext(file, proofName);
+          if (ctx.closer !== 'Admitted.') {
+            throw new Error(`Proof "${proofName}" is already closed (${ctx.closer})`);
+          }
+          const target = ctx.holes.find(h => h.name === hole);
+          if (!target) {
+            const avail = ctx.holes.map(h => h.name).join(', ') || '(none — use refine_proof first)';
+            throw new Error(`No open hole [${hole}] in "${proofName}" — available: ${avail}`);
+          }
+          if (target.shelved) {
+            throw new Error(
+              `Hole [${hole}] is shelved — it will resolve by unification when its dependents are filled, ` +
+              `or fill the holes that mention ?${hole} first`
+            );
+          }
+
+          let s = rawScript.trim();
+          if (s.length > 0 && !s.endsWith('.')) s += '.';
+          // Validate freshness of any new hole names introduced by the script
+          const newNames = extractHoleNames(s);
+          const takenNames = new Set(ctx.holes.map(h => h.name));
+          for (const n of newNames) {
+            if (takenNames.has(n)) {
+              throw new Error(`Hole name ?[${n}] already exists in this proof — choose a fresh name`);
+            }
+          }
+
+          const multi = isMultiSentence(s);
+          const candidate = multi ? `[${hole}]: { ${s} }` : `[${hole}]: ${s}`;
+
+          // Spec run
+          let runR: RunResult<number>;
+          try {
+            runR = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+              st: ctx.st, tac: candidate, opts: { memo: false },
+            });
+          } catch (e: any) {
+            const msg = e?.message || String(e);
+            const goalCtx = `\n  [${hole}]${target.hyps ? ' hyps: ' + target.hyps : ''}\n  ⊢ ${target.goal}`;
+            const hint = multi
+              ? '\n  note: multi-sentence fills must fully close the hole. To leave sub-holes, use a single `unshelve refine (… ?[x] …)` sentence.'
+              : '';
+            return reply(
+              `${fileLine(file, ctx.bounds.endLine)} — fill [${hole}] FAILED (file untouched): ${msg}${goalCtx}${hint}`,
+              { applied: false, error: msg }
+            );
+          }
+
+          // Restore naming invariant on any new auto-named goals
+          let afterHoles = await holesForState(runR.st);
+          const renameScript = buildRenameScript(afterHoles, hole);
+          if (renameScript) {
+            try {
+              const rn = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                st: runR.st, tac: renameScript, opts: { memo: false },
+              });
+              runR = rn;
+              afterHoles = await holesForState(rn.st);
+            } catch { /* keep unnamed — still reported in table */ }
+          }
+          // Authoritative completion signal — the post-write re-query is only
+          // for display (it can be flaky right after a write; an empty table
+          // must never be conflated with "no holes").
+          const finished = !!runR.proof_finished;
+
+          const beforeNames = new Set(ctx.holes.map(h => h.name));
+          const afterNames = new Set(afterHoles.map(h => h.name));
+          const closed = [...beforeNames].filter(n => !afterNames.has(n));
+          const created = afterHoles.filter(h => !beforeNames.has(h.name));
+          const unificationClosed = closed.filter(n => n !== hole);
+
+          const closedMsg = closed.length > 0
+            ? `closed: ${closed.join(', ')}${unificationClosed.length > 0 ? ` (${unificationClosed.join(', ')} by unification)` : ''}`
+            : 'no holes closed';
+          const newMsg = created.length > 0 ? `; new: ${created.map(h => h.name).join(', ')}` : '';
+
+          if (!commit) {
+            const specTable = finished ? [] : afterHoles;
+            return reply(
+              `try_fill [${hole}] OK — ${closedMsg}${newMsg}; remaining: ${specTable.length}` +
+              `${finished ? ' (proof would be finished — Qed would apply)' : ''}\n` +
+              `${formatHoleTable(specTable)}\n\n(speculative — file not modified)`,
+              { applied: false, speculative: true, finished, closed, created: created.map(h => h.name), holes: specTable }
+            );
+          }
+
+          // Commit: insert the selector line(s) before the closer
+          const insertText = renameScript
+            ? `  ${candidate}\n  ${renameScript}\n`
+            : `  ${candidate}\n`;
+          pushFileHistory(file, ctx.doc.text, proofName);
+          const newText = docManager.applyEdits(ctx.doc.text, [{
+            range: {
+              start: { line: ctx.bounds.endLine, character: 0 },
+              end: { line: ctx.bounds.endLine, character: 0 },
+            },
+            newText: insertText,
+          }]);
+          await docManager.updateDocument(file, newText);
+          await docManager.saveDocument(file);
+          await resyncFile(file);
+
+          // Re-query from the file — display only. An empty result is trusted
+          // only when the spec run says the proof is finished.
+          let remaining: HoleEntry[] = finished ? [] : afterHoles;
+          if (!finished) {
+            try {
+              const c2 = await refinementContext(file, proofName);
+              if (c2.holes.length > 0) remaining = c2.holes;
+            } catch { /* keep speculative table */ }
+          }
+
+          let qedMsg = '';
+          if (finished) {
+            try {
+              const cur = docManager.getDocument(file)!;
+              const { text: qedText, applied } = applyAutoQed(cur.text, proofName);
+              if (applied) {
+                await docManager.updateDocument(file, qedText);
+                await docManager.saveDocument(file);
+                await resyncFile(file);
+                qedMsg = ' — Qed applied';
+              }
+            } catch { /* best-effort */ }
+          }
+
+          return reply(
+            `${fileLine(file, ctx.bounds.endLine)} — filled [${hole}] → ${closedMsg}${newMsg}${qedMsg}\n` +
+            `remaining holes (${remaining.length}):\n${formatHoleTable(remaining)}` +
+            (remaining.length > 0
+              ? `\n\nnext: fill_hole with one of: ${remaining.filter(h => !h.shelved).map(h => h.name).join(', ')}`
+              : ''),
+            { applied: true, closed, created: created.map(h => h.name), holes: remaining }
+          );
+        }
 
         default:
           throw new Error(`Unknown tool: ${name}`);

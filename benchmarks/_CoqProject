@@ -1,4 +1,5 @@
 -R . McpCoqLspBenchmark
+complete/challenge.v
 complete/pcf_ref.v
 complete/snakelet_wp.v
 complete/dep_vec.v

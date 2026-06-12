@@ -275,9 +275,22 @@ export function replaceAdmitLine(
   // Tactic-level admit. — replace the admit line.
   const prefix = admitPrefix(line);
   if (!line.includes('admit.')) return text;
+
+  // Detect closing brace from { (* Label:hash *) admit. } — move it
+  // to its own line so sealOpenGoals inserts admits before the }.
+  const admitIdx = line.indexOf('admit.');
+  const afterAdmit = line.substring(admitIdx + 'admit.'.length).trim();
+  let newText: string;
+  if (afterAdmit) {
+    const leadingWs = (line.match(/^(\s*)/) || [''])[0];
+    newText = `${prefix}${tactic}\n${leadingWs}${afterAdmit}\n`;
+  } else {
+    newText = prefix ? `${prefix}${tactic}\n` : `${tactic}\n`;
+  }
+
   return applyTextEdits(text, [{
     range: { start: { line: admitLine, character: 0 }, end: { line: admitLine + 1, character: 0 } },
-    newText: prefix ? `${prefix}${tactic}\n` : `${tactic}\n`,
+    newText: newText,
   }]);
 }
 

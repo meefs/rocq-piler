@@ -939,6 +939,56 @@ describe('replaceAdmitLine', () => {
     // Handler would add seal after LSP check; function just replaces
     expect(result).not.toContain('admit.'); // only Admitted. at closing
   });
+
+  it('preserves closing } on brace admit: { (* Label:hash *) admit. }', () => {
+    const brace = [
+      'Lemma q : True.',
+      'Proof.',
+      '  { (* T_Var:eb261139 *) admit. }',
+      'Admitted.',
+    ].join('\n');
+    const lines = brace.split('\n');
+    const admitLine = lines.findIndex(l => l.includes('admit.'));
+    const result = replaceAdmitLine(brace, admitLine, 'exact I.');
+    // Tactic inserted, closing } moved to its own line at original indent
+    expect(result).toContain('  { (* T_Var:eb261139 *) exact I.');
+    expect(result).toContain('  }');
+    expect(result).not.toContain('admit.');
+    // Verify exact line content — the } must be at the same indent as the {
+    const rlines = result.split('\n');
+    const braceClose = rlines.find(l => l.includes('}') && !l.includes('{'));
+    expect(braceClose).toBe('  }');
+  });
+
+  it('brace admit + sealOpenGoals: admits go between tactic and closing }', () => {
+    const brace = [
+      'Lemma q : True.',
+      'Proof.',
+      '  { (* T_Var:eb261139 *) admit. }',
+      'Admitted.',
+    ].join('\n');
+    const lines = brace.split('\n');
+    const admitLine = lines.findIndex(l => l.includes('admit.'));
+    // 1. Replace admit with non-closing tactic — brace } moved to its own line
+    const afterReplace = replaceAdmitLine(brace, admitLine, 'split.');
+    // Locate the closing } line dynamically (after replacement)
+    const rlines = afterReplace.split('\n');
+    const bracketLine = rlines.findIndex(l => l.trim() === '}');
+    expect(bracketLine).toBeGreaterThanOrEqual(0);
+    // 2. Simulate sealOpenGoals: insert 1 admit BEFORE the closing }
+    const sealed = applyTextEdits(afterReplace, [{
+      range: { start: { line: bracketLine, character: 0 }, end: { line: bracketLine, character: 0 } },
+      newText: '    admit.\n',
+    }]);
+    // Admit goes BEFORE closing }
+    const sealedLines = sealed.split('\n');
+    expect(sealedLines[bracketLine - 1]).toContain('{ (* T_Var:eb261139 *) split.');
+    expect(sealedLines[bracketLine]).toContain('    admit.');
+    // The closing } should be at original indent, before Admitted.
+    expect(sealedLines[bracketLine + 1]).toBe('  }');
+    // Admitted. must come after the closing brace
+    expect(sealedLines[bracketLine + 2]).toContain('Admitted.');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════

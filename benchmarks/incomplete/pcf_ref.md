@@ -35,11 +35,16 @@ preservation theorem with `Admitted`. You must:
 
 ## Constraints
 
+- Copy `benchmarks/incomplete/pcf_ref.v` to `benchmarks/complete/pcf_ref.v`
+  and work exclusively on that copy. Do NOT modify the incomplete file.
 - You MUST use the rocq-piler MCP tools to complete the proof — do NOT
   edit the `.v` file directly with text edits. Use `stratify`,
   `insert_tactics`, `close_admits`, `add_lemma`, etc.
+- Do NOT read or inspect any existing proof or solution. The ground truth
+  in `benchmarks/complete/pcf_ref.v` is the target, not a reference to
+  consult.
 
-## File
+## Files
 
 `benchmarks/incomplete/pcf_ref.v` — the challenge (Admitted)
-`benchmarks/complete/pcf_ref.v` — ground truth (all Qed)
+`benchmarks/complete/pcf_ref.v` — write your solution here

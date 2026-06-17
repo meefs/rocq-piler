@@ -163,11 +163,11 @@ async function main() {
   // File history per file path — used by coq_undo to restore previous versions
   const fileHistory = new Map<string, Array<{text: string, proof: string | null}>>();
   const MAX_HISTORY = 50;
-  // Track the last insertion per file — used by coq_insert_tactic replace:true
+  // Track the last insertion per file — used by coq_insert_tactics replace:true
   const lastInsertion = new Map<string, { range: Range }>();
   // Track the active proof per file — used by coq_undo to scope undo to current proof
   const currentProof = new Map<string, string>();
-  // Track position of last replaced admit — used by insert_tactic to land on reopened bullet
+  // Track position of last replaced admit — used by insert_tactics to land on reopened bullet
   const lastAdmitReplaced = new Map<string, number>();
 
   /** Clamp a position to be within [0, lines.length-1] — never past EOF. */
@@ -349,143 +349,22 @@ async function main() {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
       tools: [
+
+
+
+
+
+
         {
-          name: 'open_goals',
+           name: 'insert_tactics',
           description:
-            'Get current open goals for a proof in a Coq/Rocq file. ' +
-            'Uses Prev mode by default. Takes a proof name.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              file: { type: 'string', description: 'Path to the .v file' },
-              name: { type: 'string', description: 'Proof name (e.g. "preservation")' },
-              pp_format: { type: 'string', enum: ['Str', 'Pp'], description: 'Pretty-printing format (default: Str)' },
-              compact: { type: 'boolean', description: 'Use compact hypothesis display' },
-              mode: { type: 'string', enum: ['Prev', 'After'], description: 'Goal position mode (default: Prev)' },
-            },
-            required: ['file', 'name'],
-          },
-        },
-        {
-          name: 'proof_state',
-          description:
-            'Get richer proof context including proof name and statements',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              file: { type: 'string' },
-              position: {
-                type: 'object',
-                properties: {
-                  line: { type: 'number' },
-                  character: { type: 'number' },
-                },
-                required: ['line', 'character'],
-              },
-            },
-            required: ['file', 'position'],
-          },
-        },
-        {
-          name: 'snap_state',
-          description:
-            'Get an opaque state identifier from a file position (Pétanque)',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              file: { type: 'string' },
-              position: {
-                type: 'object',
-                properties: {
-                  line: { type: 'number' },
-                  character: { type: 'number' },
-                },
-                required: ['line', 'character'],
-              },
-              memo: { type: 'boolean', description: 'Enable memoization' },
-              hash: { type: 'boolean', description: 'Compute state hash' },
-            },
-            required: ['file', 'position'],
-          },
-        },
-        {
-          name: 'exec_tactic',
-          description:
-            'Run a tactic/command against a state (speculative execution)',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              state_id: { type: 'number', description: 'State identifier' },
-              tactic: { type: 'string', description: 'Tactic or command text' },
-              memo: { type: 'boolean' },
-              hash: { type: 'boolean' },
-            },
-            required: ['state_id', 'tactic'],
-          },
-        },
-        {
-          name: 'state_goals',
-          description: 'Get goals for a given state identifier',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              state_id: { type: 'number' },
-              compact: { type: 'boolean' },
-            },
-            required: ['state_id'],
-          },
-        },
-        {
-          name: 'edit_file',
-          description: 'Apply text edits to a file and re-sync with rocq-lsp. Use "find"/"replace" for simple text search-and-replace instead of computing line numbers.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              file: { type: 'string' },
-              find: { type: 'string', description: 'Text to search for (use instead of edits for simple replacements)' },
-              replace: { type: 'string', description: 'Replacement text (use with find)' },
-              edits: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    range: {
-                      type: 'object',
-                      properties: {
-                        start: {
-                          type: 'object',
-                          properties: {
-                            line: { type: 'number' },
-                            character: { type: 'number' },
-                          },
-                          required: ['line', 'character'],
-                        },
-                        end: {
-                          type: 'object',
-                          properties: {
-                            line: { type: 'number' },
-                            character: { type: 'number' },
-                          },
-                          required: ['line', 'character'],
-                        },
-                      },
-                      required: ['start', 'end'],
-                    },
-                    newText: { type: 'string' },
-                  },
-                  required: ['range', 'newText'],
-                },
-              },
-            },
-            required: ['file'],
-          },
-        },
-        {
-          name: 'insert_tactic',
-          description:
-            'Insert a tactic into a proof and return updated goals. ' +
-            'Auto-prepends bullet prefix. Pass replace:true to retry. ' +
-            'Pass admit_hash to replace a specific admitted bullet (hash from focus_proof).',
+            'Insert a tactic (or composition) into a proof and return updated goals. ' +
+            'Use admit_hash to target a specific admitted bullet (the 8-char hash from stratify or focus_proof). ' +
+            'Use dry_run:true to speculatively evaluate without modifying the file — test a tactic against ' +
+            'a hash-targeted admit before committing. Auto-prepends brace prefix when Coq requires a bullet. ' +
+            'Pass replace:true to undo the last insertion and retry. ' +
+            'Compound tactics (e.g. "pose proof ...; destruct ...; exists ...; split ...") are inserted atomically; ' +
+            'if they leave open focused goals, the tool seals them as nested hash-addressable admit blocks.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -495,6 +374,7 @@ async function main() {
               follow_with_goals: { type: 'boolean', description: 'Query goals after inserting' },
               replace: { type: 'boolean', description: 'Replace the last inserted tactic' },
               admit_hash: { type: 'string', description: 'Hash from focus_proof admits section — replace this admit with tactic' },
+              dry_run: { type: 'boolean', description: 'Speculative check only — does not modify the file' },
             },
             required: ['file', 'name', 'tactic'],
           },
@@ -558,54 +438,22 @@ async function main() {
             required: ['file', 'term'],
           },
         },
-        {
-          name: 'undo_step',
-          description:
-            'Restore the file to before the last N edit operations (coq_insert_tactic or coq_apply_edit). Uses operation history, not span counting.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              file: { type: 'string' },
-              n: {
-                type: 'number',
-                description: 'Number of file versions to undo (default: 1)',
-              },
-            },
-            required: ['file'],
-          },
-        },
-        {
-           name: 'try_step',
-          description:
-            'Single-call speculative tactic execution: get state, run tactic, and return updated goals. ' +
-            'Position is optional — uses "name" or cursor. Does not modify the file.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              file: { type: 'string' },
-              name: { type: 'string', description: 'Proof name' },
-              tactic: { type: 'string', description: 'Tactic to run speculatively' },
-              compact: { type: 'boolean', description: 'Use compact hypothesis display' },
-            },
-            required: ['file', 'name', 'tactic'],
-          },
-        },
+
         {
           name: 'stratify',
           description:
             'Case-split a proof and discharge the easy cases in one call. Runs a ' +
             'skeleton tactic (e.g. "induction H; intros; inversion Ht; subst"), then ' +
             'independently attempts each resulting subgoal with every tactic in a ' +
-            'closing portfolio (each attempt speculative, wrapped in solve [...]). ' +
-            'Writes the result into the file: solved cases get their winning tactic ' +
-            'inlined as a bullet; survivors become labelled, hash-addressable ' +
-            '"- (* CaseName *) admit." bullets. With cases_from=<inductive name>, ' +
-            'subgoals are labelled by constructor. Report is conclusion-only per ' +
-            'survivor (with its hash). Follow up per survivor with insert_tactic ' +
-            'admit_hash=<hash>, or stratify again with admit_hash=<hash> to run a ' +
-            'nested skeleton+portfolio inside that survivor (two-level case ' +
-            'elimination, e.g. induction then inversion). ' +
-            'Use write=false for a dry run.',
+            'closing portfolio (each attempt wrapped in solve [...]). Writes the result ' +
+            'into the file: solved cases get their winning tactic inlined as a bullet; ' +
+            'survivors become labelled, hash-addressable ' +
+            '"{ (* CaseName:hash *) admit. }" bullets (hash is 8 hex chars). ' +
+            'Report lists survivors by hash and goal. Use close_admits to batch-close ' +
+            'survivors with a portfolio of hash→tactic mappings. Or target individually ' +
+            'via insert_tactics admit_hash=<hash>, or stratify again with admit_hash=<hash>.' +
+            'Use write=false for a dry run. This is the primary entry point for ' +
+            'multi-case induction proofs.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -635,6 +483,43 @@ async function main() {
           },
         },
         {
+          name: 'close_admits',
+          description:
+            'Use after stratify to batch-close the survivors. ' +
+            'Give it a portfolio of {hashes: [...], tactic: "..."} entries mapping ' +
+            'admit hashes to closing tactics; entries are processed in order. ' +
+            'The special hash "*" expands to all currently-unclosed admits (not ' +
+            'already matched by earlier entries). Per-hash speculative dry-run ' +
+            'first: if the tactic closes the goal, the edit is committed; ' +
+            'otherwise the admit is left as-is. ' +
+            'Returns which hashes were closed and which were not (with errors).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', description: 'Path to a .v file' },
+              name: { type: 'string', description: 'Proof name (e.g. "preservation")' },
+              portfolio: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    hashes: {
+                      anyOf: [
+                        { type: 'string' },
+                        { type: 'array', items: { type: 'string' } },
+                      ],
+                      description: 'Hash(es) to target. Use "*" to match all currently-unclosed admits not yet processed.',
+                    },
+                    tactic: { type: 'string', description: 'Tactic to try on each target admit' },
+                  },
+                  required: ['hashes', 'tactic'],
+                },
+              },
+            },
+            required: ['file', 'name', 'portfolio'],
+          },
+        },
+        {
           name: 'check_file',
           description: 'Force document checking and return completion status',
           inputSchema: {
@@ -649,40 +534,7 @@ async function main() {
             required: ['file'],
           },
         },
-        {
-          name: 'check_range',
-          description: 'Check a specific line range in a Coq file and return diagnostics',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              file: { type: 'string', description: 'Path to the .v file' },
-              range: {
-                type: 'object',
-                properties: {
-                  start: {
-                    type: 'object',
-                    properties: {
-                      line: { type: 'number' },
-                      character: { type: 'number' },
-                    },
-                    required: ['line'],
-                  },
-                  end: {
-                    type: 'object',
-                    properties: {
-                      line: { type: 'number' },
-                      character: { type: 'number' },
-                    },
-                    required: ['line'],
-                  },
-                },
-                required: ['start', 'end'],
-                description: 'Line range to check (0-based)',
-              },
-            },
-            required: ['file', 'range'],
-          },
-        },
+
         {
           name: 'require_lib',
           description:
@@ -728,7 +580,7 @@ async function main() {
           description:
             'Get full proof tree: current goals, bullet stack depth/levels, ' +
             'and the proof script up to the given position. ' +
-            'Sets the file cursor — subsequent coq_insert_tactic/coq_try_tactic calls ' +
+            'Sets the file cursor — subsequent coq_insert_tactics/coq_try_tactic calls ' +
             'use this cursor automatically. Auto-removes empty Admitted stubs. ' +
             'Accepts proof name (e.g. "has_type_weaken") or explicit position.',
           inputSchema: {
@@ -789,21 +641,6 @@ async function main() {
                 description: 'Lemma/theorem name or array of names',
                 anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
               },
-            },
-            required: ['file', 'name'],
-          },
-        },
-        {
-          name: 'delete_step',
-          description:
-            'Remove the last tactic line from the active proof. ' +
-            'Does NOT rely on undo history — finds and removes the last tactic directly.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              file: { type: 'string', description: 'Path to a .v file' },
-              name: { type: 'string', description: 'Proof name (e.g. "preservation")' },
-              count: { type: 'number', description: 'Number of tactic lines to remove (default: 1)' },
             },
             required: ['file', 'name'],
           },
@@ -938,7 +775,7 @@ async function main() {
         }
         return 'Proof complete. Qed auto-applied.';
       }
-      if (goals.length === 0 && bgGoals > 0) return `Bullet closed. ${bgGoals} goal(s) in background. Insert next bullet.`;
+      if (goals.length === 0 && bgGoals > 0) return `Bullet closed. ${bgGoals} goal(s) in background. Insert next { }.`;
       if (goals.length === 1) {
         if (bgGoals > 0) return `Bullet open [${bullet || '-'}]. 1 goal at focus, ${bgGoals} in background.`;
         return '1 goal. Insert a tactic.';
@@ -1012,89 +849,7 @@ async function main() {
 
     try {
       switch (name) {
-        case 'open_goals': {
-          const { file, name, pp_format, compact, mode } = args as {
-            file: string;
-            name: string;
-            pp_format?: string;
-            compact?: boolean;
-            mode?: string;
-          };
 
-          currentProof.set(file, name);
-
-          let position: Position;
-          if (name) {
-            const doc = await ensureDocumentOpened(file);
-            const docLines = doc.text.split('\n');
-            const proofLine = findProofLine(docLines, name);
-            if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
-            position = autoAdvancePosition(doc.text, { line: proofLine, character: 0 });
-          } else {
-            throw new Error('name is required for coq_open_goals');
-          }
-
-          // Ensure document is open
-          const doc = await ensureDocumentOpened(file);
-
-          // Send proof/goals request
-          const result = await retryDocumentNotReady(() =>
-            lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-              textDocument: {
-                uri: doc.uri,
-                version: doc.version,
-              },
-              position,
-              pp_format: pp_format || 'Str',
-              compact: compact ?? true,
-              mode: mode || 'Prev',
-            })
-          );
-
-          if (result.error) {
-            return reply(`${fileLine(file, position.line)} — error: ${result.error}`, result);
-          }
-          const ngoals = (result.goals?.goals || []).length;
-          return reply(`${fileLine(file, position.line)} — ${ngoals} goal(s)`, result);
-        }
-
-        case 'proof_state': {
-          const { file, position } = args as {
-            file: string;
-            position: Position;
-          };
-
-          // Get goals
-          const doc = await ensureDocumentOpened(file);
-          const goalsResult = await retryDocumentNotReady(() =>
-            lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-              textDocument: { uri: doc.uri, version: doc.version },
-              position,
-              pp_format: 'Str',
-            })
-          );
-
-          // Get proof info
-          let proofInfo: ProofInfo | null = null;
-          try {
-            proofInfo = await lspClient.sendRequest<ProofInfo>(
-              'petanque/proof_info_at_pos',
-              {
-                uri: doc.uri,
-                position,
-              }
-            );
-          } catch {
-            // Proof info may not be available
-          }
-
-          const pname = proofInfo?.name || 'unknown';
-          const ngoals = goalsResult.goals?.goals?.length || 0;
-          return reply(
-            `${fileLine(file, position.line)} — proof ${pname}, ${ngoals} goal(s)`,
-            { proof: proofInfo, goals: goalsResult.goals, messages: goalsResult.messages, error: goalsResult.error }
-          );
-        }
 
         case 'focus_proof': {
           const { file, name } = args as {
@@ -1233,7 +988,7 @@ async function main() {
               }
               parts.push(`    goal: ${a.goal}`);
               if (isRootAdmitted && nGoals > 1) {
-                parts.push(`    ^ ${nGoals} focused goals — insert ${nGoals} bulleted admits (-) to address each individually, then use their hashes`);
+                parts.push(`    ^ ${nGoals} focused goals — insert ${nGoals} brace admits ({ }) to address each individually, then use their hashes`);
               }
             });
           }
@@ -1270,167 +1025,20 @@ async function main() {
           });
         }
 
-        case 'snap_state': {
-          const { file, position, memo, hash } = args as {
-            file: string;
-            position: Position;
-            memo?: boolean;
-            hash?: boolean;
-          };
 
-          const doc = await ensureDocumentOpened(file);
 
-          const result = await lspClient.sendRequest<RunResult<number>>(
-            'petanque/get_state_at_pos',
-            {
-              uri: doc.uri,
-              position,
-              opts: {
-                memo: memo ?? true,
-                hash: hash ?? true,
-              },
-            }
-          );
 
-          return reply(
-            `${fileLine(file, position.line)} — state_id=${result.st}`,
-            result
-          );
-        }
 
-        case 'exec_tactic': {
-          const { state_id, tactic, memo, hash } = args as {
-            state_id: number;
-            tactic: string;
-            memo?: boolean;
-            hash?: boolean;
-          };
-
-          const result = await lspClient.sendRequest<RunResult<number>>(
-            'petanque/run',
-            {
-              st: state_id,
-              tac: tactic,
-              opts: { memo: memo ?? true, hash: hash ?? true },
-            }
-          );
-
-          const nFeedback = (result.feedback || []).length;
-          return reply(
-            `run state=${state_id} "${tactic}" → st=${result.st}, proof_finished=${!!result.proof_finished}, feedback=${nFeedback}`,
-            { state_id: result.st, proof_finished: result.proof_finished, feedback: result.feedback }
-          );
-        }
-
-        case 'state_goals': {
-          const { state_id, compact } = args as {
-            state_id: number;
-            compact?: boolean;
-          };
-
-          const result = await lspClient.sendRequest<GoalConfig<string>>(
-            'petanque/goals',
-            {
-              st: state_id,
-              opts: { compact: compact ?? true },
-            }
-          );
-
-          return reply(
-            `goals for state_id=${state_id}: ${result.goals?.length || 0} goal(s)`,
-            result
-          );
-        }
-
-        case 'edit_file': {
-          const { file, edits, find, replace } = args as {
-            file: string;
-            edits?: Array<{ range: Range; newText: string }>;
-            find?: string;
-            replace?: string;
-          };
-
-          // Get current document
-          let doc = docManager.getDocument(file);
-          if (!doc) {
-            doc = await ensureDocumentOpened(file);
-          }
-
-          // Resolve edits: either from explicit ranges or from text search
-          let resolvedEdits: Array<{ range: Range; newText: string }>;
-          if (find !== undefined) {
-            const idx = doc.text.indexOf(find);
-            if (idx === -1) {
-              return reply(`text not found: "${find.substring(0, 80)}"`, { found: false });
-            }
-            const before = doc.text.substring(0, idx);
-            const beforeLines = before.split('\n');
-            const findLines = find.split('\n');
-            const startLine = beforeLines.length - 1;
-            const startChar = beforeLines[beforeLines.length - 1].length;
-            const endLine = startLine + (findLines.length - 1);
-            const endChar = findLines.length === 1
-              ? startChar + find.length
-              : findLines[findLines.length - 1].length;
-            resolvedEdits = [{
-              range: {
-                start: { line: startLine, character: startChar },
-                end: { line: endLine, character: endChar },
-              },
-              newText: replace ?? '',
-            }];
-          } else {
-            resolvedEdits = edits || [];
-          }
-
-          // Apply edits
-          pushFileHistory(file, doc.text, currentProof.get(file));
-          const newText = docManager.applyEdits(doc.text, resolvedEdits);
-
-          // Update and save
-          await docManager.updateDocument(file, newText);
-          await docManager.saveDocument(file);
-
-          // Force LSP to re-process after bulk edit — close + reopen
-          // to drop stale bindings from the old file state.
-          try {
-            await docManager.closeDocument(file);
-            const reopened = await ensureDocumentOpened(file);
-            // Wait for coq-lsp to finish re-processing the document.
-            // Without this, subsequent proof/goals queries hit stale state
-            // and return "illegal begin of vernac" or time out.
-            await retryDocumentNotReady(() =>
-              lspClient.sendRequest('coq/getDocument', {
-                textDocument: {
-                  uri: reopened.uri,
-                  version: reopened.version,
-                },
-              })
-            );
-          } catch (e) {
-            console.error('[edit_file] re-sync failed:', e);
-          }
-
-          const updatedDoc = docManager.getDocument(file)!;
-
-          const summary = find !== undefined
-            ? `replaced "${find.substring(0, 40)}${find.length > 40 ? '…' : ''}"`
-            : `applied ${resolvedEdits.length} edit(s)`;
-          return reply(
-            `${fileLine(file, 0)} — ${summary}, v${updatedDoc.version}`,
-            { file, new_version: updatedDoc.version, found: true }
-          );
-        }
-
-        case 'insert_tactic': {
+        case 'insert_tactics': {
           const rawPos = (args as any).position as Position | undefined;
-          const { file, name, tactic: rawTactic, follow_with_goals, replace, admit_hash } = args as {
+          const { file, name, tactic: rawTactic, follow_with_goals, replace, admit_hash, dry_run } = args as {
             file: string;
             name: string;
             tactic: string;
             follow_with_goals?: boolean;
             replace?: boolean;
             admit_hash?: string;
+            dry_run?: boolean;
           };
 
           currentProof.set(file, name);
@@ -1528,6 +1136,121 @@ async function main() {
             tactic = tactic + '.';
           }
 
+          // Dry-run: speculative execution only, no file modification.
+          if (dry_run) {
+            if (admit_hash) {
+              // Hash-targeted dry run: find admit, run tactic, return result
+              const docLines = doc.text.split('\n');
+              const bounds = proofBounds(docLines, name);
+              if (!bounds) throw new Error(`Proof not found: "${name}"`);
+              const admitLines = findAdmitLines(docLines, bounds.proofLine, bounds.endLine);
+              for (const line of admitLines) {
+                try {
+                  const { snapLine, snapChar } = admitSnapPosition(docLines, line, bounds.proofLine);
+                  const stateR = await retryDocumentNotReady(() =>
+                    lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                      uri: doc.uri, position: { line: snapLine, character: snapChar }, opts: { memo: false },
+                    })
+                  );
+                  const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                    st: stateR.st, opts: { compact: true },
+                  });
+                  const goalText = (goalsR.goals || []).map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                  const h = createHash('md5').update(goalText).digest('hex').slice(0, 8);
+                  if (h !== admit_hash) continue;
+                  const runResult = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                    st: stateR.st, tac: tactic, opts: { memo: false },
+                  });
+                  const postGoals = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                    st: runResult.st, opts: { compact: true },
+                  });
+                  const nGoals = postGoals.goals?.length ?? 0;
+                  const finished = runResult.proof_finished ? ' (proof finished!)' : '';
+                  const goalTextOut = postGoals.goals?.length ? '\n' + formatGoals(postGoals) : '';
+                  return reply(
+                    `"${tactic}" at ${fileLine(file, line)} → ${nGoals} goal(s)${finished}${goalTextOut}`,
+                    { state_id: runResult.st, proof_finished: runResult.proof_finished, goals: postGoals, feedback: runResult.feedback }
+                  );
+                } catch {}
+              }
+              throw new Error(`No admit found with hash "${admit_hash}"`);
+            }
+            // Cursor-based dry run: get state at insPos, run tactic, return result.
+            // If the cursor is outside proof mode, fall back to admit lines.
+            {
+              let stateId: number | null = null;
+              let locLine = proofLine;
+              try {
+                const stateR = await retryDocumentNotReady(() =>
+                  lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                    uri: doc.uri, position: insPos, opts: { memo: true },
+                  })
+                );
+                stateId = stateR.st;
+              } catch {}
+              if (stateId === null) {
+                // Try admit lines + toplevel Admitted. as fallback
+                const docLines = doc.text.split('\n');
+                const bounds = proofBounds(docLines, name);
+                if (bounds) {
+                  // Collect all candidate positions: tactical admits + toplevel Admitted.
+                  const candidates: number[] = [];
+                  for (const l of findAdmitLines(docLines, bounds.proofLine, bounds.endLine)) {
+                    candidates.push(l);
+                  }
+                  if (candidates.length === 0 && bounds.endLine > bounds.proofLine) {
+                    candidates.push(bounds.endLine); // toplevel Admitted.
+                  }
+                  for (const line of candidates) {
+                    try {
+                      const { snapLine, snapChar } = admitSnapPosition(docLines, line, bounds.proofLine);
+                      const sr = await retryDocumentNotReady(() =>
+                        lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                          uri: doc.uri, position: { line: snapLine, character: snapChar }, opts: { memo: true },
+                        })
+                      );
+                      const preGoals = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                        st: sr.st, opts: { compact: true },
+                      });
+                      if ((preGoals.goals?.length ?? 0) > 0 || line === bounds.endLine) {
+                        stateId = sr.st;
+                        locLine = line;
+                        break;
+                      }
+                    } catch { continue; }
+                  }
+                }
+              }
+              if (stateId === null) {
+                return reply(
+                  `"${tactic}" at ${fileLine(file, proofLine)} → no active proof state found`,
+                  { proof_finished: false, goals: null, feedback: [], error: 'no active proof state' }
+                );
+              }
+              try {
+                const runR = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                  st: stateId, tac: tactic, opts: { memo: false },
+                });
+                const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                  st: runR.st, opts: { compact: true },
+                });
+                const nGoals = goalsR.goals?.length ?? 0;
+                const finished = runR.proof_finished ? ' (proof finished!)' : '';
+                const goalText = goalsR.goals?.length ? '\n' + formatGoals(goalsR) : '';
+                return reply(
+                  `"${tactic}" at ${fileLine(file, locLine)} → ${nGoals} goal(s)${finished}${goalText}`,
+                  { state_id: runR.st, proof_finished: runR.proof_finished, goals: goalsR, feedback: runR.feedback }
+                );
+              } catch (e: any) {
+                const msg = e?.message || String(e);
+                return reply(
+                  `"${tactic}" at ${fileLine(file, locLine)} → tactic failed: ${msg}`,
+                  { proof_finished: false, goals: null, feedback: [], error: msg }
+                );
+              }
+            }
+          }
+
           // If admit_hash is provided, find and replace the admit with the new tactic
           if (admit_hash) {
             // Re-fetch doc to ensure we have the latest version from disk
@@ -1556,9 +1279,42 @@ async function main() {
             }
             if (targetLines.length === 0) throw new Error(`No admit found with hash "${admit_hash}"`);
 
+            // Save parent bullet context from original document before replacement
+            const origDocLines = freshDoc.text.split('\n');
+            const parentBulletLine = origDocLines[targetLines[0]] || '';
+
+            // Speculative check: run the tactic via Pétanque before modifying the file.
+            // This catches Coq errors (e.g. apply with non-matching types) and avoids
+            // silently sealing goals that the tactic cannot close.
+            {
+              const firstLine = targetLines[0];
+              const { snapLine, snapChar } = admitSnapPosition(
+                origDocLines, firstLine, bounds.proofLine
+              );
+              try {
+                const stateR = await retryDocumentNotReady(() =>
+                  lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                    uri: freshDoc.uri,
+                    position: { line: snapLine, character: snapChar },
+                    opts: { memo: false },
+                  })
+                );
+                await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                  st: stateR.st, tac: tactic, opts: { memo: false },
+                });
+              } catch (e: any) {
+                const msg = e?.message || String(e);
+                return reply(
+                  `${fileLine(file, firstLine)} — tactic rejected by Coq — NOT applied\n  Coq says: ${msg}`,
+                  { applied: false, error: msg }
+                );
+              }
+            }
+
             // Apply tactic to ALL matching admits using shared replaceAllMatchingAdmits.
             // getGoalText calls the LSP — same function as focus_proof admits section uses.
-            pushFileHistory(file, freshDoc.text, null);
+            const preEditText = freshDoc.text;
+            pushFileHistory(file, preEditText, null);
             const { text: finalText, count: totalReplaced } = await replaceAllMatchingAdmits(
               freshDoc.text, name, tactic, admit_hash,
               async (line, currentText) => {
@@ -1605,22 +1361,37 @@ async function main() {
               // Query goals at the END of the last tactic line (After mode) to
               // see what goals remain directly after the tactic, not at the next bullet.
               const tacticEndChar = (docLines[tacticEndLine] || '').length;
-              const goalsR = await retryDocumentNotReady(() =>
-                lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-                  textDocument: { uri: freshDoc.uri, version: freshDoc.version },
-                  position: { line: tacticEndLine, character: tacticEndChar },
-                  pp_format: 'Str', mode: 'After',
-                })
-              );
-              const nF = goalsR?.goals?.goals?.length ?? 0;
+               const goalsR = await retryDocumentNotReady(() =>
+                 lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                   textDocument: { uri: freshDoc.uri, version: freshDoc.version },
+                   position: { line: tacticEndLine, character: tacticEndChar },
+                   pp_format: 'Str', mode: 'After',
+                 })
+               );
+               // Check for tactic errors — roll back and report instead of sealing.
+               const tacticErrors = (goalsR?.messages || []).filter((m: any) => m.level === 1);
+               if (tacticErrors.length > 0) {
+                 await docManager.updateDocument(file, preEditText);
+                 await docManager.saveDocument(file);
+                 const errMsg = tacticErrors.map((m: any) => m.text || m.message).join('; ');
+                 return reply(
+                   `${fileLine(file, targetLines[0])} — tactic error — rolled back\n  Coq says: ${errMsg}`,
+                   { applied: false, error: errMsg, rolled_back: true }
+                 );
+               }
+               const nF = goalsR?.goals?.goals?.length ?? 0;
               const nBgAfter = (goalsR?.goals?.stack || []).reduce(
                 (s: number, [b, a]: any[]) => s + (b?.length || 0) + (a?.length || 0), 0
               );
               // Re-seal if the tactic left focused goals open at the tactic end position.
               if (nF > 0) {
-                const parentBulletLine = docLines[firstLine] || '';
+                const goals = goalsR?.goals?.goals || [];
+                const sealHashes = goals.map((g: any) => {
+                  const goalText = (g.ty || '').replace(/\s+/g, ' ');
+                  return createHash('md5').update(goalText).digest('hex').slice(0, 8);
+                });
                 const { text: sealed, sealMsg: msg } = sealOpenGoals(
-                  finalText, tacticEndLine, nF, parentBulletLine
+                  finalText, tacticEndLine, nF, parentBulletLine, sealHashes
                 );
                 sealMsg = ` (${msg})`;
                 await docManager.updateDocument(file, sealed);
@@ -1787,23 +1558,20 @@ async function main() {
             let indent = '';
 
             if (lspSuggestsNext && lspBulletChar) {
-              // Coq says a sibling/current-level bullet is mandatory. Trust it.
-              bullet = lspBulletChar;
+              // Coq says a sibling/current-level bullet is mandatory — use brace.
+              bullet = '{';
               const suggestedIndent = findLastBulletIndent(docLines, insPos.line, proofLine, bullet);
               indent = ' '.repeat(suggestedIndent ?? 0);
             } else if (lspUnfinished && lspBulletChar && focusedGoals > 1) {
-              // Current bullet has multiple focused goals. Open a child bullet with
-              // a different token; same-token bullets pop/reuse the parent focus.
-              bullet = nextChildBullet(lspBulletChar);
+              // Current bullet has multiple focused goals. Open a child brace.
+              bullet = '{';
               const parentIndent = findLastBulletIndent(docLines, insPos.line, proofLine, lspBulletChar)
                 ?? computeBulletIndent(doc.text, insPos, proofLine).length;
               indent = ' '.repeat(parentIndent + 2);
             } else if (!lspBullet && totalRemaining > 1 && !hasBullet && computeBulletIndent(doc.text, insPos, proofLine)) {
               // Inside an existing bullet structure with no active bullet context —
-              // auto-open the next sibling. Only fires if there are already bullet
-              // lines in the proof body (computeBulletIndent returns non-empty).
-              // Does NOT fire at the top level of a fresh proof (no prior bullets).
-              bullet = '-';
+              // auto-open the next sibling with brace.
+              bullet = '{';
               indent = '';
             } else if (atLineStart) {
               indent = computeBulletIndent(doc.text, insPos, proofLine);
@@ -2248,50 +2016,6 @@ async function main() {
           }
         }
 
-        case 'check_range': {
-          const { file, range } = args as { 
-            file: string; 
-            range: { start: { line: number; character?: number }; end: { line: number; character?: number } };
-          };
-
-          try {
-            const doc = await ensureDocumentOpened(file);
-
-            // Get the full document info first
-            const result = await retryDocumentNotReady(() =>
-              lspClient.sendRequest<{
-                spans: Array<{ range: Range }>;
-                completed: { status: string; range: Range };
-              }>('coq/getDocument', {
-                textDocument: {
-                  uri: doc.uri,
-                  version: doc.version,
-                },
-                ast: false,
-                goals: 'Str',
-              })
-            );
-
-            // Filter spans to those within the requested range
-            const targetSpans = result.spans?.filter(span => {
-              const spanLine = span.range.start.line;
-              return spanLine >= range.start.line && spanLine <= range.end.line;
-            }) || [];
-
-            // Check if any spans in the range have errors (we'll need to get diagnostics)
-            // For now, just return span information
-            const spanCount = targetSpans.length;
-            return reply(
-              `${fileLine(file, range.start.line)}-${fileLine(file, range.end.line)} — ${spanCount} span(s), overall: ${result.completed?.status || 'unknown'}`,
-              { file, range: `L${range.start.line}-L${range.end.line}`, span_count: spanCount, overall_completed: result.completed?.status, success: true }
-            );
-          } catch (error) {
-            return err(
-              `${fileLine(file, range.start.line)}-${fileLine(file, range.end.line)} — check failed: ${error instanceof Error ? error.message : String(error)}`,
-              error instanceof Error ? error.message : String(error)
-            );
-          }
-        }
 
         case 'search_lemmas': {
           const { file, pattern } = args as {
@@ -2451,228 +2175,6 @@ async function main() {
           );
         }
 
-        case 'undo_step': {
-          const { file, n } = args as {
-            file: string;
-            n?: number;
-          };
-
-          const count = n ?? 1;
-          const stack = fileHistory.get(file) || [];
-
-          if (stack.length === 0) {
-            throw new Error(`Nothing to undo for ${file}`);
-          }
-
-          const activeProof = currentProof.get(file);
-          if (!activeProof) {
-            throw new Error(`No active proof for ${file} — use coq_focus or coq_open_goals first to set proof scope`);
-          }
-
-          // Count matching entries from the end, skipping non-matching ones
-          const matchingIndices: number[] = [];
-          for (let i = stack.length - 1; i >= 0 && matchingIndices.length < count; i--) {
-            if (stack[i].proof === activeProof) {
-              matchingIndices.push(i);
-            }
-          }
-
-          if (matchingIndices.length < count) {
-            const available = matchingIndices.length;
-            throw new Error(`Can only undo ${available} operation(s) in proof "${activeProof}", requested ${count}`);
-          }
-
-          // Restore to the state before the oldest matching entry
-          const oldestIdx = matchingIndices[matchingIndices.length - 1];
-          const restoreText = stack[oldestIdx].text;
-
-          // Remove all matching entries
-          const keep = stack.filter((_, i) => !matchingIndices.includes(i));
-          fileHistory.set(file, keep);
-
-          await docManager.updateDocument(file, restoreText);
-          await docManager.saveDocument(file);
-
-          return reply(
-            `${fileLine(file, 0)} — undone ${count} operation(s) in proof "${activeProof}", ${keep.length} remaining in history`,
-            { applied: true, undone: count, remaining_history: keep.length, proof: activeProof }
-          );
-        }
-
-        case 'try_step': {
-          const { file, name, tactic, compact } = args as {
-            file: string;
-            name: string;
-            tactic: string;
-            compact?: boolean;
-          };
-
-          currentProof.set(file, name);
-
-          // Auto-`.`: append period if caller forgot it
-          let t = tactic.trim();
-          if (t.length > 0 && !t.endsWith('.')) t = t + '.';
-
-          const doc = await ensureDocumentOpened(file);
-          const docLines = doc.text.split('\n');
-          const proofLine = findProofLine(docLines, name);
-          if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
-          // Use insertPosition (same as coq_insert_tactic) to find the current
-          // proof cursor — this is the Admitted./Qed. line. Passing that position
-          // to get_state_at_pos in Prev mode gives the state after all preceding
-          // tactics, i.e. the current proof state.
-          const position = insertPosition(doc.text, { line: proofLine, character: 0 });
-          const uri = doc.uri;
-
-          async function getStateAt(pos: Position) {
-            return retryDocumentNotReady(() =>
-              lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
-                uri, position: pos, opts: { memo: true, hash: true },
-              })
-            );
-          }
-
-          async function tryRunTactic(st: number) {
-            const r = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
-              st, tac: t, opts: { memo: true, hash: true },
-            });
-            const g = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
-              st: r.st, opts: { compact: compact ?? true },
-            });
-            return { runResult: r, goalsResult: g };
-          }
-
-          // Try at user's position (Prev mode)
-          const stateResult = await getStateAt(position);
-          let result: { runResult: RunResult<number>; goalsResult: GoalConfig<string> };
-
-          // If the proof has given-up (admit) lines, snap state at each one and
-          // try running the tactic there — this lets try_step work against given-up bullets.
-          const tryAgainstAdmitLines = async () => {
-            const bounds = proofBounds(docLines, name);
-            if (!bounds) return null;
-            const admitLines = findAdmitLines(docLines, bounds.proofLine, bounds.endLine);
-            for (const admitLine of admitLines) {
-              // Snap just before 'admit' on the line so we get the pre-admit goal state.
-              const lineText = docLines[admitLine] || '';
-              const admitIdx = lineText.search(/\badmit\b/);
-              const character = admitIdx > 0 ? admitIdx - 1 : 0;
-              let admitState: RunResult<number>;
-              try {
-                admitState = await getStateAt({ line: admitLine, character });
-              } catch { continue; /* position not in proof mode, try next */ }
-
-              // Check this state has an active goal
-              let preGoals: GoalConfig<string>;
-              try {
-                preGoals = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
-                  st: admitState.st, opts: { compact: compact ?? true },
-                });
-              } catch { continue; }
-              if (!preGoals?.goals?.length) continue;
-
-              // Now run the tactic speculatively — return result whether it succeeds or fails
-              try {
-                const r = await tryRunTactic(admitState.st);
-                return reply(
-                  `"${t}" at ${fileLine(file, admitLine)} → ${r.goalsResult.goals?.length ?? 0} goal(s)` +
-                  (r.runResult.proof_finished ? ' (proof finished!)' : '') +
-                  (r.goalsResult.goals?.length ? '\n' + formatGoals(r.goalsResult) : ''),
-                  { state_id: r.runResult.st, proof_finished: r.runResult.proof_finished, goals: r.goalsResult, feedback: r.runResult.feedback }
-                );
-              } catch (tacErr: any) {
-                // Tactic failed — return the error with the goal context so the user can see what they're working with
-                const goalText = formatGoals(preGoals);
-                return reply(
-                  `"${t}" at ${fileLine(file, admitLine)} → tactic failed: ${tacErr.message}\n${goalText}`,
-                  { state_id: admitState.st, proof_finished: false, goals: preGoals, feedback: [] }
-                );
-              }
-            }
-            return null;
-          };
-
-          // Check if cursor has active goals; if not, fall back to admit lines.
-          let initialGoals: GoalConfig<string> | null = null;
-          try {
-            initialGoals = await retryDocumentNotReady(() =>
-              lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
-                st: stateResult.st, opts: { compact: compact ?? true },
-              })
-            );
-          } catch { /* state may be outside proof mode — handled below */ }
-
-          const hasActiveGoals = (initialGoals?.goals?.length ?? 0) > 0;
-          const hasGivenUp    = (initialGoals?.given_up?.length ?? 0) > 0;
-
-          if (!hasActiveGoals && (hasGivenUp || !initialGoals)) {
-            const r = await tryAgainstAdmitLines();
-            if (r) return r;
-          }
-
-          try {
-            result = await tryRunTactic(stateResult.st);
-          } catch (e: any) {
-            if (e?.message?.includes('illegal begin of vernac') ||
-                e?.message?.includes('No proof-editing in progress')) {
-              // Position is outside proof mode — either before or after the proof body.
-              // Find the last span that ends before our position and retry from there.
-              const docInfo = await retryDocumentNotReady(() =>
-                lspClient.sendRequest<{ spans: Array<{ range: Range }> }>('coq/getDocument', {
-                  textDocument: { uri, version: doc.version }, ast: false,
-                })
-              );
-              const allSpans = docInfo.spans || [];
-              // First try: span just before position (we landed after proof end)
-              const spansBefore = allSpans.filter(
-                s => s.range.end.line < position.line ||
-                     (s.range.end.line === position.line && s.range.end.character <= position.character)
-              ).sort((a, b) => b.range.end.line - a.range.end.line || b.range.end.character - a.range.end.character);
-              if (spansBefore.length > 0) {
-                const prevSpan = spansBefore[0];
-                const prevPos: Position = { line: prevSpan.range.end.line, character: prevSpan.range.end.character };
-                try {
-                  const prevState = await getStateAt(prevPos);
-                  result = await tryRunTactic(prevState.st);
-                } catch {
-                  // Also try admit lines as a last resort
-                  const r = await tryAgainstAdmitLines();
-                  if (r) return r;
-                  throw e;
-                }
-              } else {
-                // Fall back: try span just after position (we landed before proof start)
-                const spansAfter = allSpans.filter(
-                  s => s.range.start.line > position.line || (s.range.start.line === position.line && s.range.start.character > position.character)
-                ).sort((a, b) => a.range.start.line - b.range.start.line || a.range.start.character - b.range.start.character);
-                if (spansAfter.length === 0) {
-                  const r = await tryAgainstAdmitLines();
-                  if (r) return r;
-                  throw e;
-                }
-                const innerState = await getStateAt(spansAfter[0].range.start);
-                result = await tryRunTactic(innerState.st);
-              }
-            } else {
-              throw e;
-            }
-          }
-
-          const { runResult, goalsResult } = result;
-          const finished = runResult.proof_finished ? ' (proof finished!)' : '';
-          const nGoals = goalsResult.goals?.length || 0;
-
-          // Format goals for display
-          let goalText = '';
-          if (goalsResult.goals && goalsResult.goals.length > 0) {
-            goalText = '\n' + formatGoals(goalsResult);
-          }
-
-          return reply(
-            `"${t}" at ${fileLine(file, position.line)} → ${nGoals} goal(s)${finished}${goalText}`,
-            { state_id: runResult.st, proof_finished: runResult.proof_finished, goals: goalsResult, feedback: runResult.feedback }
-          );
-        }
 
         case 'stratify': {
           const { file, name, skeleton, portfolio, cases_from, write, attempt_timeout_ms, admit_hash } = args as {
@@ -2717,7 +2219,19 @@ async function main() {
           const baseSt = await runPendingImports(uri, baseState.st);
           let skelRun: RunResult<number>;
           try { skelRun = await lspClient.sendRequest<RunResult<number>>('petanque/run', { st: baseSt, tac: skel, opts: { memo: true, hash: true } }); }
-          catch (e: any) { return err(`stratify ${name}: skeleton failed: ${e?.message ?? e}`); }
+          catch (e: any) {
+            const rawMsg: string = e?.message ?? String(e);
+            // Check for variable name conflicts in the skeleton
+            if (rawMsg.includes('already used') || rawMsg.includes('already exists')) {
+              const clash = rawMsg.match(/['"]?(\w+)['"]?\s+is already used/i)?.[1]
+                || rawMsg.match(/identifier\s+['"]?(\w+)['"]?/i)?.[1];
+              const hint = clash
+                ? `\n  The skeleton introduces "${clash}" which clashes with a name in the lemma statement. Rename this variable in your skeleton (e.g. use "${clash}0" instead).`
+                : '\n  A variable name in the skeleton clashes with the lemma statement. Rename the conflicting variable.';
+              return err(`stratify ${name}: skeleton failed: ${rawMsg}${hint}`);
+            }
+            return err(`stratify ${name}: skeleton failed: ${rawMsg}`);
+          }
           const skelGoals = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', { st: skelRun.st, opts: { compact: true } });
           const goals = skelGoals.goals || [];
           const nGoals = goals.length;
@@ -2818,6 +2332,22 @@ async function main() {
                 if (applied) { await docManager.updateDocument(file, qt); await docManager.saveDocument(file); }
               } catch {}
             }
+            // Force LSP re-sync after writing — close and reopen so subsequent
+            // queries (e.g. insert_tactics with admit_hash) see the new state.
+            try {
+              await docManager.closeDocument(file);
+              const reopened = await ensureDocumentOpened(file);
+              await retryDocumentNotReady(() =>
+                lspClient.sendRequest('coq/getDocument', {
+                  textDocument: {
+                    uri: reopened.uri,
+                    version: reopened.version,
+                  },
+                })
+              );
+            } catch (e) {
+              console.error('[stratify] re-sync failed:', e);
+            }
           }
 
           const nSolved = nGoals - survivors.length;
@@ -2834,8 +2364,326 @@ async function main() {
             const closed = cd ? findTacticAdmitLines(cd.text.split('\n'), bounds.proofLine, proofBounds(cd.text.split('\n'), name)?.endLine ?? bounds.endLine).length === 0 : false;
             parts.push(closed ? 'all cases closed — Qed applied' : 'all nested cases closed — other admits remain in proof');
           }
-          else if (survivors.length > 0) parts.push('next: stratify admit_hash=<hash> for nested case-elimination, or insert_tactic admit_hash=<hash> per survivor');
+          else if (survivors.length > 0) parts.push('next: use close_admits to batch-close survivors, or stratify admit_hash=<hash> for nested case-elimination, or insert_tactics admit_hash=<hash> per survivor');
           return reply(parts.join('\n'), { written, solved: nSolved, total: nGoals, survivors: survivors.map(i => ({ name: nameOf(i), hash: goalHashes[i] })) });
+        }
+
+        case 'close_admits': {
+          const { file, name, portfolio } = args as {
+            file: string; name: string;
+            portfolio: Array<{ hashes: string | string[]; tactic: string }>;
+          };
+          currentProof.set(file, name);
+          if (!portfolio || portfolio.length === 0) {
+            throw new Error('close_admits: portfolio is empty');
+          }
+
+          const processed = new Set<string>();
+          const results: { closed: string[]; not_closed: Array<{ hash: string; error: string }> } = { closed: [], not_closed: [] };
+
+          // Resolve hashes to a flat list; "*" expands to all currently-unclosed
+          async function resolveHashes(
+            hashes: string | string[],
+            docLines: string[],
+            bounds: { proofLine: number; endLine: number },
+          ): Promise<string[]> {
+            if (hashes === '*') {
+              const doc = docManager.getDocument(file);
+              if (!doc) return [];
+              const admits = await queryAdmitHashes(doc, docLines, bounds);
+              return [...new Set(admits.map(a => a.hash).filter(h => !processed.has(h)))];
+            }
+            if (Array.isArray(hashes)) return [...new Set(hashes.filter(h => !processed.has(h)))];
+            if (processed.has(hashes)) return [];
+            return [hashes];
+          }
+
+          // Process one hash: dry-run speculatively, commit on success
+          async function processOne(
+            hash: string,
+            tactic: string,
+            currentDocLines: string[],
+            currentBounds: { proofLine: number; endLine: number },
+            tacticIdx: number,
+          ): Promise<{ closed: boolean; error?: string }> {
+            // Find the admit line for this hash
+            const admitLines = findAdmitLines(currentDocLines, currentBounds.proofLine, currentBounds.endLine);
+            let targetLine = -1;
+            for (const line of admitLines) {
+              try {
+                const { snapLine, snapChar } = admitSnapPosition(currentDocLines, line, currentBounds.proofLine);
+                const freshDoc = docManager.getDocument(file)!;
+                const stateR = await retryDocumentNotReady(() =>
+                  lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                    uri: freshDoc.uri,
+                    position: { line: snapLine, character: snapChar },
+                    opts: { memo: false },
+                  })
+                );
+                const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                  st: stateR.st, opts: { compact: true },
+                });
+                const goalText = (goalsR.goals || []).map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                const h = createHash('md5').update(goalText).digest('hex').slice(0, 8);
+                if (h === hash) { targetLine = line; break; }
+              } catch {}
+            }
+            if (targetLine < 0) return { closed: false, error: `admit not found for hash "${hash}"` };
+
+            // Speculative dry-run: try the tactic via Pétanque before editing
+            {
+              const { snapLine, snapChar } = admitSnapPosition(
+                currentDocLines, targetLine, currentBounds.proofLine
+              );
+              try {
+                const freshDoc = docManager.getDocument(file)!;
+                const stateR = await retryDocumentNotReady(() =>
+                  lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                    uri: freshDoc.uri,
+                    position: { line: snapLine, character: snapChar },
+                    opts: { memo: false },
+                  })
+                );
+                await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                  st: stateR.st, tac: tactic, opts: { memo: false },
+                });
+              } catch (e: any) {
+                const msg = e?.message || String(e);
+                return { closed: false, error: msg };
+              }
+            }
+
+            // Commit: apply replaceAllMatchingAdmits
+            const freshDoc = docManager.getDocument(file)!;
+            const preEditText = freshDoc.text;
+            pushFileHistory(file, preEditText, null);
+            try {
+              const { text: finalText, count: replaced } = await replaceAllMatchingAdmits(
+                freshDoc.text, name, tactic, hash,
+                async (line, currentText) => {
+                  try {
+                    await docManager.updateDocument(file, currentText);
+                    const curLines = currentText.split('\n');
+                    const curBounds = proofBounds(curLines, name);
+                    const { snapLine: sl, snapChar: sc } = admitSnapPosition(
+                      curLines, line, curBounds?.proofLine ?? 0
+                    );
+                    const tempDoc = docManager.getDocument(file)!;
+                    const stateR = await retryDocumentNotReady(() =>
+                      lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                        uri: tempDoc.uri,
+                        position: { line: sl, character: sc },
+                        opts: { memo: false },
+                      })
+                    );
+                    const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                      st: stateR.st, opts: { compact: true },
+                    });
+                    return (goalsR.goals || []).map(g => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                  } catch { return null; }
+                }
+              );
+
+              if (replaced === 0) return { closed: false, error: 'no matching admit found during commit phase' };
+
+              await docManager.updateDocument(file, finalText);
+              await docManager.saveDocument(file);
+
+              // Re-sync
+              try {
+                await docManager.closeDocument(file);
+                await ensureDocumentOpened(file);
+              } catch {}
+
+              // Re-seal open goals after tactic
+              try {
+                const sealedDoc = docManager.getDocument(file)!;
+                const sealedLines = sealedDoc.text.split('\n');
+                const sealedBounds = proofBounds(sealedLines, name);
+                if (sealedBounds) {
+                  const parentBulletLine = sealedLines[targetLine] || '';
+                  const tacticLines = (tactic.match(/\n/g) || []).length + 1;
+                  const tacticEndLine = targetLine + tacticLines - 1;
+                  const tacticEndChar = (sealedLines[tacticEndLine] || '').length;
+                  const goalsR = await retryDocumentNotReady(() =>
+                    lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                      textDocument: { uri: sealedDoc.uri, version: sealedDoc.version },
+                      position: { line: tacticEndLine, character: tacticEndChar },
+                      pp_format: 'Str', mode: 'After',
+                    })
+                  );
+                  const tacticErrors = (goalsR?.messages || []).filter((m: any) => m.level === 1);
+                  if (tacticErrors.length > 0) {
+                    // Rollback on error
+                    await docManager.updateDocument(file, preEditText);
+                    await docManager.saveDocument(file);
+                    await docManager.closeDocument(file);
+                    await ensureDocumentOpened(file);
+                    const errMsg = tacticErrors.map((m: any) => m.text || m.message).join('; ');
+                    return { closed: false, error: `tactic error: ${errMsg}` };
+                  }
+                  const nFocused = goalsR?.goals?.goals?.length ?? 0;
+                  if (nFocused > 0) {
+                    const goals = goalsR?.goals?.goals || [];
+                    const sealHashes = goals.map((g: any) => {
+                      const gt = (g.ty || '').replace(/\s+/g, ' ');
+                      return createHash('md5').update(gt).digest('hex').slice(0, 8);
+                    });
+                    const { text: sealed, sealMsg } = sealOpenGoals(
+                      finalText, tacticEndLine, nFocused, parentBulletLine, sealHashes
+                    );
+                    await docManager.updateDocument(file, sealed);
+                    await docManager.saveDocument(file);
+                  }
+                }
+              } catch {}
+
+              return { closed: true };
+            } catch (e: any) {
+              // Rollback on failure
+              try {
+                await docManager.updateDocument(file, preEditText);
+                await docManager.saveDocument(file);
+                await docManager.closeDocument(file);
+                await ensureDocumentOpened(file);
+              } catch {}
+              return { closed: false, error: `commit failed: ${e?.message || String(e)}` };
+            }
+          }
+
+          // Main loop: process each portfolio entry sequentially
+          for (let pi = 0; pi < portfolio.length; pi++) {
+            const entry = portfolio[pi];
+            let tactic = entry.tactic?.trim();
+            if (!tactic) throw new Error('close_admits: tactic is empty');
+            // Ensure tactic ends with "." (required by petanque/run)
+            if (!tactic.endsWith('.')) tactic += '.';
+
+            // Refresh document
+            const doc = await ensureDocumentOpened(file);
+            const docLines = doc.text.split('\n');
+            const bounds = proofBounds(docLines, name);
+            if (!bounds) throw new Error(`Proof not found: "${name}"`);
+
+            const hashes = await resolveHashes(entry.hashes, docLines, bounds);
+            if (hashes.length === 0) continue;
+
+            // Process hashes in order, re-reading state after each commit
+            for (const hash of hashes) {
+              // Mark as processed BEFORE attempting (even if it fails)
+              processed.add(hash);
+
+              // Re-fetch document state for line numbers
+              const curDoc = docManager.getDocument(file) || doc;
+              const curLines = curDoc.text.split('\n');
+              const curBounds = proofBounds(curLines, name);
+              if (!curBounds) {
+                results.not_closed.push({ hash, error: 'proof bounds lost after previous edit' });
+                continue;
+              }
+              const outcome = await processOne(hash, tactic, curLines, curBounds, pi);
+              if (outcome.closed) {
+                results.closed.push(hash);
+              } else {
+                results.not_closed.push({ hash, error: outcome.error || 'unknown' });
+              }
+            }
+          }
+
+          // Build reply
+          const parts: string[] = [`close_admits ${name}: processed ${processed.size} hash(es)`];
+          if (results.closed.length > 0) {
+            parts.push(`  closed ${results.closed.length}: ${results.closed.join(', ')}`);
+          }
+          if (results.not_closed.length > 0) {
+            parts.push(`  not closed ${results.not_closed.length}:`);
+            for (const n of results.not_closed) {
+              parts.push(`    ${n.hash}: ${n.error}`);
+            }
+          } else {
+            parts.push('  all closed');
+          }
+
+          // Auto-Qed (once, after all portfolio entries)
+          try {
+            const qedDoc = docManager.getDocument(file);
+            if (qedDoc) {
+              const qedLines = qedDoc.text.split('\n');
+              const qedBounds = proofBounds(qedLines, name);
+              if (qedBounds) {
+                const admittedLine = qedBounds.endLine;
+                let hasFocusedGoals = false;
+                if (qedLines[admittedLine]?.trim() === 'Admitted.') {
+                  try {
+                    const { snapLine: sl, snapChar: sc } = admitSnapPosition(qedLines, admittedLine, qedBounds.proofLine);
+                    const sR = await retryDocumentNotReady(() =>
+                      lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                        uri: qedDoc.uri, position: { line: sl, character: sc }, opts: { memo: false },
+                      })
+                    );
+                    const gR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                      st: sR.st, opts: { compact: true },
+                    });
+                    hasFocusedGoals = (gR.goals?.length ?? 0) > 0 || ((gR.stack || []).length ?? 0) > 0;
+                  } catch {}
+                }
+                if (!hasFocusedGoals) {
+                  const { text: qt, applied } = applyAutoQed(qedDoc.text, name);
+                  if (applied) {
+                    await docManager.updateDocument(file, qt);
+                    await docManager.saveDocument(file);
+                    await docManager.closeDocument(file);
+                    await ensureDocumentOpened(file);
+                  }
+                }
+              }
+            }
+          } catch {}
+
+          // Show remaining admits
+          try {
+            const finalDoc = docManager.getDocument(file);
+            if (finalDoc) {
+              const finalLines = finalDoc.text.split('\n');
+              const finalBounds = proofBounds(finalLines, name);
+              if (finalBounds) {
+                const admitLines = findAdmitLines(finalLines, finalBounds.proofLine, finalBounds.endLine);
+                if (admitLines.length > 0) {
+                  const remaining: string[] = [];
+                  for (const line of admitLines) {
+                    try {
+                      const { snapLine, snapChar } = admitSnapPosition(finalLines, line, finalBounds.proofLine);
+                      const stateR = await retryDocumentNotReady(() =>
+                        lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
+                          uri: finalDoc.uri,
+                          position: { line: snapLine, character: snapChar },
+                          opts: { memo: false },
+                        })
+                      );
+                      const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                        st: stateR.st, opts: { compact: true },
+                      });
+                      const goals = goalsR.goals || [];
+                      const goalText = goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                      const h = createHash('md5').update(goalText).digest('hex').slice(0, 8);
+                      remaining.push(`${h}  L${line + 1}: ${goalText || '(no goals)'}`);
+                    } catch { remaining.push(`error  L${line + 1}`); }
+                  }
+                  if (remaining.length > 0) {
+                    parts.push(`\n${remaining.length} admit(s) remaining:\n${remaining.join('\n')}`);
+                  }
+                }
+              }
+            }
+          } catch {}
+
+          return reply(parts.join('\n'), {
+            processed: processed.size,
+            closed: results.closed.length,
+            not_closed: results.not_closed.length,
+            closed_hashes: results.closed,
+            not_closed_details: results.not_closed,
+          });
         }
 
         case 'require_lib': {
@@ -3162,61 +3010,6 @@ async function main() {
           return reply(
             `${fileLine(file, 0)} — deleted ${namesStr}`,
             { applied: true, deleted: totalDeleted, names }
-          );
-        }
-
-        case 'delete_step': {
-          const { file, name, count } = args as {
-            file: string;
-            name: string;
-            count?: number;
-          };
-
-          const n = count ?? 1;
-          const doc = await ensureDocumentOpened(file);
-          const docLines = doc.text.split('\n');
-          const proofLine = findProofLine(docLines, name);
-          if (proofLine < 0) throw new Error(`Proof not found: "${name}"`);
-
-          // Find the last N tactic lines before Admitted/Qed
-          let admitLine = -1;
-          for (let i = proofLine + 1; i < docLines.length; i++) {
-            if (docLines[i].trim() === 'Admitted.' || docLines[i].trim() === 'Qed.') {
-              admitLine = i; break;
-            }
-          }
-          if (admitLine < 0) throw new Error('No Admitted./Qed. found');
-
-          // Collect the last N non-blank, non-Proof lines
-          const toRemove: number[] = [];
-          let scanning = admitLine - 1;
-          while (toRemove.length < n && scanning > proofLine) {
-            const l = docLines[scanning].trim();
-            if (l !== '' && l !== 'Proof.' && !l.startsWith('(*')) {
-              toRemove.unshift(scanning);
-            }
-            scanning--;
-          }
-
-          if (toRemove.length === 0) throw new Error('No tactics to delete');
-
-          pushFileHistory(file, doc.text, currentProof.get(file));
-
-          let currentText = doc.text;
-          // Remove from last to first to preserve indices
-          for (let i = toRemove.length - 1; i >= 0; i--) {
-            currentText = docManager.applyEdits(currentText, [{
-              range: { start: { line: toRemove[i], character: 0 }, end: { line: toRemove[i] + 1, character: 0 } },
-              newText: '',
-            }]);
-          }
-
-          await docManager.updateDocument(file, currentText);
-          await docManager.saveDocument(file);
-
-          return reply(
-            `${fileLine(file, 0)} — removed ${toRemove.length} tactic(s) from proof "${name}"`,
-            { applied: true, removed: toRemove.length }
           );
         }
 

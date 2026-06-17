@@ -186,8 +186,14 @@ export function admitSnapPosition(
     return { snapLine: proofLine, snapChar: (lines[proofLine] || '').length };
   }
 
-  // Tactic-level admit. — snap just before 'admit'
+  // Tactic-level admit. — snap just inside the opening brace or just before 'admit'
+  const braceIdx = lineText.indexOf('{');
   const admitIdx = lineText.search(/\badmit\b/);
+  // If this admit is inside a brace block, snap right after the '{' to get the focused goal.
+  // Otherwise snap just before 'admit'.
+  if (braceIdx >= 0 && braceIdx < admitIdx) {
+    return { snapLine: admitLineIdx, snapChar: braceIdx + 1 };
+  }
   return { snapLine: admitLineIdx, snapChar: admitIdx > 0 ? admitIdx - 1 : 0 };
 }
 
@@ -236,7 +242,7 @@ export function admitPrefix(line: string): string {
 /**
  * Compute the insert position after a bullet marker on a reopened admit line.
  * For "  + " returns { character: 4 }. For bare "" returns { character: 0 }.
- * Called by insert_tactic after replace_admit reopens a bullet.
+ * Called by insert_tactics after replace_admit reopens a bullet.
  */
 export function bulletInsertPos(line: string): number {
   const match = line.match(/^\s*[-+*]+(?:\s)/);
@@ -342,6 +348,7 @@ export async function replaceAllMatchingAdmits(
  */
 export function nextChildBullet(parent: string | undefined): string {
   if (!parent) return '-';
+  if (parent === '{') return '-';
   if (/^-+$/.test(parent)) return '+'.repeat(parent.length);
   if (/^\++$/.test(parent)) return '*'.repeat(parent.length);
   if (/^\*+$/.test(parent)) return '-'.repeat(parent.length + 1);
@@ -367,24 +374,27 @@ export function sealOpenGoals(
   tacticLine: number,
   nOpen: number,
   parentBulletLine?: string,
+  hashes?: string[],
 ): { text: string; sealMsg: string } {
   if (nOpen <= 0) return { text, sealMsg: '' };
 
-  const match = parentBulletLine?.match(/^(\s*)([-+*]+)\s/);
+  const match = parentBulletLine?.match(/^(\s*)([-+*]+|\{)\s/);
   const parentIndent = match ? match[1].length : 0;
-  const parentToken = match ? match[2] : undefined;
+  const childIndent = ' '.repeat(parentIndent + 2);
 
   let seal: string;
   let sealMsg: string;
 
+  const label = (i: number) =>
+    hashes && hashes[i] ? ` (* ${hashes[i]} *)` : '';
+
   if (nOpen > 1) {
-    const childToken = nextChildBullet(parentToken);
-    const childIndent = ' '.repeat(parentIndent + 2);
-    seal = Array.from({ length: nOpen }, () => `${childIndent}${childToken} admit.\n`).join('');
+    seal = Array.from({ length: nOpen }, (_, i) =>
+      `${childIndent}{${label(i)} admit. }\n`
+    ).join('');
     sealMsg = `sealed with ${nOpen} admits — ${nOpen} goal(s) open after tactic`;
   } else {
-    const tacticIndent = match ? parentIndent + parentToken!.length + 1 : 2;
-    seal = ' '.repeat(tacticIndent) + 'admit.\n';
+    seal = `${childIndent}{${label(0)} admit. }\n`;
     sealMsg = 'sealed with admit — 1 goal(s) open after tactic';
   }
 

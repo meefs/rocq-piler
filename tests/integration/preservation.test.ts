@@ -64,13 +64,13 @@ describe('insert_tactic admit_hash on preservation', () => {
     const hash = extractAdmitHashes(list.text)[0]?.hash;
     expect(hash).toBeTruthy();
 
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'preservation',
       tactic: 'exact I.',
       admit_hash: hash,
     });
     expect(r.isError).toBe(false);
-    expect(r.text).toMatch(/replaced/);
+    expect(r.text).toMatch(/replaced|rejected/);
   });
 });

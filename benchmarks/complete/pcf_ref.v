@@ -115,94 +115,130 @@ Inductive step : tm -> heap -> tm -> heap -> Prop :=
 Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
 
 
-Lemma extends_refl : forall S : store_ty, extends S S.
+Lemma extends_refl : forall S, extends S S.
 Proof.
-intros S; exists []; rewrite app_nil_r; reflexivity.
+intro S; exists []; rewrite app_nil_r; auto.
 Qed.
 
 
-Lemma extends_nth_error : forall (S' S : store_ty) l T, extends S' S -> nth_error S l = Some T -> nth_error S' l = Some T.
+Lemma extends_app : forall S S2, extends (S ++ S2) S.
 Proof.
-intros S' S l T [S2 ->] H; rewrite nth_error_app1; [ exact H | apply nth_error_Some; congruence ].
+intros S S2; unfold extends; exists S2; auto.
 Qed.
 
 
-Lemma has_type_extends : forall G S t T, has_type G S t T -> forall S', extends S' S -> has_type G S' t T.
+Lemma nth_error_extends : forall S S' l T, extends S' S -> nth_error S l = Some T -> nth_error S' l = Some T.
 Proof.
-induction 1; intros; econstructor; eauto using extends_nth_error.
+intros S S' l T [S2 ->] H. rewrite nth_error_app1. exact H. apply nth_error_Some. congruence.
 Qed.
 
 
-Lemma heap_ok_extends : forall mu S, heap_ok mu S -> forall S', extends S' S -> heap_ok mu S'.
+Lemma has_type_store_extends : forall G S S' t T, has_type G S t T -> extends S' S -> has_type G S' t T.
 Proof.
-induction 1; intros; econstructor; eauto using has_type_extends, extends_nth_error.
+  intros G S S' t T Ht Hext; induction Ht.
+  { (* case_1:a1cadb49 *) solve [ econstructor; eauto ]. }
+  { (* case_2:871cb7c2 *) solve [ econstructor; eauto ]. }
+  { (* case_3:921183ee *) solve [ econstructor; eauto ]. }
+  { (* case_4:7f27afdd *) solve [ econstructor; eauto ]. }
+  { (* case_5:1a40eb0b *) solve [ econstructor; eauto ]. }
+  { (* case_6:78ab5f42 *) solve [ econstructor; eauto ]. }
+  { (* case_7:f4b71eb2 *) solve [ econstructor; eauto ]. }
+  { (* case_8:3f3c1d84 *) solve [ econstructor; eauto ]. }
+  { (* case_9:d80368b3 *) solve [ econstructor; eauto ]. }
+  { (* case_10:3ce7dd06 *) solve [ econstructor; eauto ]. }
+  { (* case_11:b5eb6186 *) solve [ econstructor; eauto ]. }
+  { (* case_12:771867f5 *) solve [ econstructor; eauto ]. }
+  { (* case_13:71f786e4 *) solve [ econstructor; eauto ]. }
+  { (* case_14:bb66202e *) solve [ constructor; eauto using nth_error_extends ]. }
 Qed.
 
 
-Lemma shift_at_preserves : forall G S t T, has_type G S t T -> forall G1 U G2, G = G1 ++ G2 -> has_type (G1 ++ U :: G2) S (shift_at (length G1) t) T.
+Lemma nth_error_insert : forall {A : Type} (G : list A) (d x : nat) (T U : A), nth_error G x = Some T -> nth_error (firstn d G ++ [U] ++ skipn d G) (if x <? d then x else x + 1) = Some T.
 Proof.
-  induction 1; intros G1 U G2 HeqG; subst; simpl.
-  { (* T_Var:eb261139 *) destruct (Nat.ltb_spec x (length G1)); simpl.
-    { (* case_1:4659ce18 *) solve [ constructor; rewrite nth_error_app1 in * by assumption; assumption ]. }
-    { (* case_2:bc8aed7a *) apply T_Var.
-      { (* case_1:a058bc74 *) solve [ rewrite nth_error_app2 by lia; rewrite nth_error_app2 in H by lia; rewrite Nat.add_1_r, Nat.sub_succ_l by lia; simpl; assumption ]. }
-    }
+intros A G. induction G as [|h t IH]; intros d x T U H. - destruct x; simpl in H; discriminate. - destruct d as [|d']. + simpl. destruct x as [|x']; simpl in *. rewrite H; reflexivity. exact H. + destruct x as [|x']; simpl in *. * rewrite H; reflexivity. * specialize (IH d' x' T U H). simpl in IH. assert (Heq : (S x' <? S d') = (x' <? d')) by (unfold Nat.ltb; simpl; reflexivity). rewrite Heq. destruct (x' <? d'); simpl; exact IH.
+Qed.
+
+
+Lemma shift_at_typing : forall G S t T d U, has_type G S t T -> has_type (firstn d G ++ [U] ++ skipn d G) S (shift_at d t) T.
+Proof.
+  intros G S t T d U Ht; revert d; induction Ht; intro d; simpl.
+  { (* case_1:8189ea8a *) destruct (x <? d) eqn:Hlt; apply T_Var; pose proof (nth_error_insert G d x T U H) as Hni; rewrite Hlt in Hni; exact Hni.
   }
-  { (* T_Num:50d832a0 *) solve [ econstructor; eauto ]. }
-  { (* T_Bool:30672327 *) solve [ econstructor; eauto ]. }
-  { (* T_Succ:d8990af8 *) solve [ econstructor; eauto ]. }
-  { (* T_Pred:8df5b4ca *) solve [ econstructor; eauto ]. }
-  { (* T_IsZero:d42f8b82 *) solve [ econstructor; eauto ]. }
-  { (* T_If:749fed39 *) solve [ econstructor; eauto ]. }
-  { (* T_Lam:69d38cf0 *) solve [ constructor; rewrite app_comm_cons; apply IHhas_type; reflexivity ]. }
-  { (* T_App:c958a56c *) solve [ econstructor; eauto ]. }
-  { (* T_Fix:ed2ab74f *) solve [ constructor; rewrite app_comm_cons; apply IHhas_type; reflexivity ]. }
-  { (* T_Ref:b996d552 *) solve [ econstructor; eauto ]. }
-  { (* T_Deref:d6548e5e *) solve [ econstructor; eauto ]. }
-  { (* T_Assign:54028baf *) solve [ econstructor; eauto ]. }
-  { (* T_Loc:2d0e0989 *) solve [ econstructor; eauto ]. }
-Qed.
-
-
-Lemma shift_preserves : forall G S t T U, has_type G S t T -> has_type (U :: G) S (shift t) T.
-Proof.
-intros G S t T U H; apply (shift_at_preserves _ _ _ _ H [] U G); reflexivity.
-Qed.
-
-
-Lemma subst_preserves : forall G' ST t T, has_type G' ST t T -> forall G1 U v, G' = G1 ++ [U] -> has_type G1 ST v U -> has_type G1 ST (subst (length G1) v t) T.
-Proof.
-  induction 1; intros G1 U v HeqG Hv; subst; simpl.
-  { (* T_Var:e4c46809 *) solve [ destruct (Nat.eqb_spec x (length G1)); [ subst; rewrite nth_error_app2, Nat.sub_diag in H by lia; simpl in H; injection H as H; subst; assumption | constructor; destruct (Nat.ltb_spec x (length G1)); [ rewrite nth_error_app1 in H by assumption; assumption | rewrite nth_error_app2 in H by lia; destruct (x - length G1) as [|k] eqn:E; [ lia | simpl in H; rewrite nth_error_nil in H; discriminate ] ] ] ]. }
-  { (* T_Num:927fd3a3 *) solve [ econstructor; eauto ]. }
-  { (* T_Bool:025574c6 *) solve [ econstructor; eauto ]. }
-  { (* T_Succ:f98072e1 *) solve [ econstructor; eauto ]. }
-  { (* T_Pred:1198af39 *) solve [ econstructor; eauto ]. }
-  { (* T_IsZero:e208defe *) solve [ econstructor; eauto ]. }
-  { (* T_If:e6d545c1 *) solve [ econstructor; eauto ]. }
-  { (* T_Lam:2e162d1a *) constructor.
-    { (* case_1:e8a6e70c *) solve [ apply (IHhas_type (T1 :: G1) U (shift v)); [ reflexivity | apply shift_preserves; assumption ] ]. }
+  { (* case_2:5af362bb *) solve [ econstructor; eauto ]. }
+  { (* case_3:26d06287 *) solve [ econstructor; eauto ]. }
+  { (* case_4:f2bf332b *) solve [ econstructor; eauto ]. }
+  { (* case_5:c34fff31 *) solve [ econstructor; eauto ]. }
+  { (* case_6:169198bd *) solve [ econstructor; eauto ]. }
+  { (* case_7:45b03ee7 *) solve [ econstructor; eauto ]. }
+  { (* case_8:f41fb15d *) specialize (IHHt (Datatypes.S d)). simpl in IHHt. apply T_Lam. exact IHHt.
   }
-  { (* T_App:88d39e4f *) solve [ econstructor; eauto ]. }
-  { (* T_Fix:40f83ee1 *) constructor.
-    { (* case_1:28b9aa39 *) solve [ apply (IHhas_type (T :: G1) U (shift v)); [ reflexivity | apply shift_preserves; assumption ] ]. }
+  { (* case_9:0e9538da *) solve [ econstructor; eauto ]. }
+  { (* case_10:7a3d804b *) specialize (IHHt (Datatypes.S d)). simpl in IHHt. apply T_Fix. exact IHHt.
   }
-  { (* T_Ref:7001e017 *) solve [ econstructor; eauto ]. }
-  { (* T_Deref:997c1111 *) solve [ econstructor; eauto ]. }
-  { (* T_Assign:2c201bd4 *) solve [ econstructor; eauto ]. }
-  { (* T_Loc:e9553e36 *) solve [ econstructor; eauto ]. }
+  { (* case_11:c1086739 *) solve [ econstructor; eauto ]. }
+  { (* case_12:a5e33412 *) solve [ econstructor; eauto ]. }
+  { (* case_13:f3144987 *) solve [ econstructor; eauto ]. }
+  { (* case_14:691a84d0 *) solve [ econstructor; eauto ]. }
 Qed.
 
 
-Lemma heap_lookup_type : forall mu ST, heap_ok mu ST -> forall l v T, heap_lookup l mu = Some v -> nth_error ST l = Some T -> has_type [] ST v T.
+Lemma shift_typing : forall G S t T U, has_type G S t T -> has_type (U :: G) S (shift t) T.
 Proof.
-induction 1; intros l0 v0 T0 Hl Hn; simpl in *; [ discriminate | destruct (Nat.eqb_spec l0 l); [ subst; injection Hl as Hl; subst; replace T0 with T by congruence; assumption | eauto ] ].
+intros G Sc t T U Ht. unfold shift. apply (shift_at_typing G Sc t T 0 U Ht).
 Qed.
 
 
-Lemma heap_update_ok : forall mu ST, heap_ok mu ST -> forall l v T, nth_error ST l = Some T -> has_type [] ST v T -> heap_ok (heap_update l v mu) ST.
+Lemma subst_typing : forall G1 Sc t T1 T2 s, has_type (G1 ++ [T1]) Sc t T2 -> has_type G1 Sc s T1 -> has_type G1 Sc (subst (length G1) s t) T2.
 Proof.
-induction 1; intros l0 v0 T0 Hn Hv; simpl; [ constructor | destruct (Nat.eqb_spec l0 l); [ subst; econstructor; eauto | econstructor; eauto ] ].
+  intros G1 Sc t; revert G1 Sc; induction t; intros G1 Sc T1 T2 s Ht Hs; simpl; inversion Ht; subst.
+  { (* case_1:890b998f *) destruct (Nat.compare n (length G1)) eqn:Hcmp; [apply Nat.compare_eq in Hcmp|apply Nat.compare_lt_iff in Hcmp|apply Nat.compare_gt_iff in Hcmp]. + subst n. rewrite Nat.eqb_refl. rewrite nth_error_app2 in H2 by auto. rewrite Nat.sub_diag in H2. simpl in H2. injection H2; intro; subst T2. exact Hs. + assert (n <> length G1) as Hne by lia. rewrite (proj2 (Nat.eqb_neq n (length G1)) Hne). apply T_Var. rewrite nth_error_app1 in H2 by auto. exact H2. + exfalso. rewrite nth_error_app2 in H2 by lia. destruct (n - length G1) as [|k] eqn:Hk. lia. simpl in H2. destruct k; simpl in H2; discriminate.
+  }
+  { (* case_2:e1713d7c *) solve [ econstructor; eauto ]. }
+  { (* case_3:1c1d7246 *) solve [ econstructor; eauto ]. }
+  { (* case_4:1fdafba7 *) solve [ econstructor; eauto ]. }
+  { (* case_5:0ae6f580 *) solve [ econstructor; eauto ]. }
+  { (* case_6:c15f75ec *) solve [ econstructor; eauto ]. }
+  { (* case_7:9a3cfa7b *) solve [ econstructor; eauto ]. }
+  { (* case_8:217a759e *) solve [ apply T_Lam; apply IHt with T1; [simpl; exact H4 | apply shift_typing; exact Hs] ]. }
+  { (* case_9:5f0e2edb *) solve [ econstructor; eauto ]. }
+  { (* case_10:fd9e4ec4 *) apply T_Fix. apply (IHt (T2 :: G1) Sc T1 T2 (shift s)). simpl. exact H2. apply shift_typing. exact Hs.
+  }
+  { (* case_11:2fa44f7b *) solve [ econstructor; eauto ]. }
+  { (* case_12:f6452af1 *) solve [ econstructor; eauto ]. }
+  { (* case_13:28b7edd7 *) solve [ econstructor; eauto ]. }
+  { (* case_14:067966c3 *) solve [ econstructor; eauto ]. }
+Qed.
+
+
+Lemma heap_lookup_typed : forall mu S l v, heap_ok mu S -> heap_lookup l mu = Some v -> exists T, nth_error S l = Some T /\ has_type [] S v T.
+Proof.
+  intros mu S l v Hok Hlook; induction Hok; simpl in Hlook.
+  { (* case_1:f92870ab *) discriminate Hlook.
+  }
+  { (* case_2:94096376 *) destruct (Nat.eqb l l0) eqn:Heq. injection Hlook; intro; subst v. apply Nat.eqb_eq in Heq. subst l0. exists T. split. exact H0. exact H. apply IHHok. exact Hlook.
+  }
+Qed.
+
+
+Lemma heap_update_ok : forall mu S l v T, heap_ok mu S -> nth_error S l = Some T -> has_type [] S v T -> heap_ok (heap_update l v mu) S.
+Proof.
+  intros mu S l v T Hok Hn Hv; induction Hok; simpl.
+  { (* case_1:d23b3754 *) solve [ econstructor; eauto ]. }
+  { (* case_2:3c0b7a8e *) solve [ destruct (Nat.eqb l l0); econstructor; eauto ]. }
+Qed.
+
+
+Lemma nth_error_app_end : forall {A : Type} (l : list A) (x : A), nth_error (l ++ [x]) (length l) = Some x.
+Proof.
+intros A l x. rewrite nth_error_app2 by auto. rewrite Nat.sub_diag. reflexivity.
+Qed.
+
+
+Lemma heap_cons_ok : forall mu Sc Sc' v T, heap_ok mu Sc -> extends Sc' Sc -> has_type [] Sc' v T -> nth_error Sc' (length mu) = Some T -> heap_ok ((length mu, v) :: mu) Sc'.
+Proof.
+  intros mu Sc Sc' v T Hok Hext Hv Hn; apply heap_cons with T; [|exact Hv|exact Hn]; clear Hn Hv; induction Hok.
+  { (* case_1:b916af3a *) solve [ apply heap_empty ]. }
+  { (* case_2:7e6b5c79 *) solve [ apply heap_cons with T0; [eauto|eauto using has_type_store_extends|eauto using nth_error_extends] ]. }
 Qed.
 
 Theorem preservation :
@@ -216,41 +252,41 @@ Theorem preservation :
       heap_ok mu' S' /\
       has_type [] S' t' T.
 Proof.
-  intros t mu t' mu' T S Ht Hstep Hok Hlen; revert T S Ht Hok Hlen; induction Hstep; intros Ty STy Ht Hok Hlen; inversion Ht; subst; clear Ht.
-  { (* S_Succ:21f2b37f *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_PredZero:3a3dc8d3 *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ]. }
-  { (* S_PredSucc:beba42d8 *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ]. }
-  { (* S_Pred:40239b57 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_IsZeroZero:70a55b34 *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ]. }
-  { (* S_IsZeroSucc:93aac8fa *) solve [ exists STy; split; [apply extends_refl|split; [assumption|constructor]] ]. }
-  { (* S_IsZero:e963d6ea *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_IfTrue:6dc90292 *) solve [ exists STy; split; [apply extends_refl|split; [assumption|assumption]] ]. }
-  { (* S_IfFalse:a03a929f *) solve [ exists STy; split; [apply extends_refl|split; [assumption|assumption]] ]. }
-  { (* S_If:c22bb06f *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_App1:ecd40415 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_App2:d0bc108b *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_AppAbs:aee4f5af *) exists STy; split; [ apply extends_refl | split; [ assumption | match goal with HL : has_type [] _ (Lam _ _) _ |- _ => inversion HL; subst end ] ].
-    { (* case_1:1044402e *) solve [ eapply subst_preserves; [ eassumption | reflexivity | assumption ] ]. }
+  intros t mu t' mu' Ty Sc Ht Hstep Hok Hlen; revert Ty Sc Ht Hok Hlen; induction Hstep; intros Ty Sc Ht Hok Hlen; inversion Ht; subst.
+  { (* case_1:bc6944e4 *) destruct (IHHstep TyNat Sc H2 Hok Hlen) as [S' [Hext [Hok' Ht']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_Succ. exact Ht'.
   }
-  { (* S_Fix:a0096667 *) exists STy; split; [ apply extends_refl | split; [ assumption | idtac ] ].
-    { (* case_1:c1a1e1de *) solve [ eapply subst_preserves; [ eassumption | reflexivity | constructor; assumption ] ]. }
+  { (* case_2:4e2abff0 *) solve [ exists Sc; split; [apply extends_refl | split; [exact Hok | econstructor; eauto]] ]. }
+  { (* case_3:7c03e22e *) solve [ exists Sc; split; [apply extends_refl | split; [exact Hok | econstructor; eauto]] ]. }
+  { (* case_4:8b8f0c8b *) destruct (IHHstep TyNat Sc H2 Hok Hlen) as [S' [Hext [Hok' Ht']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_Pred. exact Ht'.
   }
-  { (* S_Ref:c2640fd0 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_RefV:f3e7ac08 *) exists (STy ++ repeat T (length mu - length STy + 1)); split; [ eexists; reflexivity | split ].
-    { (* case_1:8bb893b1 *) econstructor.
-      { (* case_1:4087453b *) solve [ eapply heap_ok_extends; [ eassumption | eexists; reflexivity ] ]. }
-      { (* case_2:c1c57953 *) solve [ eapply has_type_extends; [ eassumption | eexists; reflexivity ] ]. }
-      { (* case_3:1be6bdfb *) solve [ rewrite nth_error_app2 by lia; apply nth_error_repeat; lia ]. }
-    }
-    { (* case_2:c3f76436 *) solve [ constructor; rewrite nth_error_app2 by lia; apply nth_error_repeat; lia ]. }
+  { (* case_5:f26294cb *) solve [ exists Sc; split; [apply extends_refl | split; [exact Hok | econstructor; eauto]] ]. }
+  { (* case_6:53442ae9 *) solve [ exists Sc; split; [apply extends_refl | split; [exact Hok | econstructor; eauto]] ]. }
+  { (* case_7:d1ee94c3 *) destruct (IHHstep TyNat Sc H2 Hok Hlen) as [S' [Hext [Hok' Ht']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_IsZero. exact Ht'.
   }
-  { (* S_Deref:092ee268 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_DerefLoc:1dd3ddbd *) exists STy; split; [ apply extends_refl | split; [ assumption | match goal with HL : has_type [] _ (Loc _) _ |- _ => inversion HL; subst end ] ].
-    { (* case_1:1d5eb59d *) solve [ eapply heap_lookup_type; eauto ]. }
+  { (* case_8:04372467 *) solve [ eexists; split; [apply extends_refl | split; [exact Hok | eauto]] ]. }
+  { (* case_9:d4d0856e *) solve [ eexists; split; [apply extends_refl | split; [exact Hok | eauto]] ]. }
+  { (* case_10:5ac4adc4 *) destruct (IHHstep TyBool Sc H4 Hok Hlen) as [S' [Hext [Hok' Ht1']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_If. exact Ht1'. exact (has_type_store_extends [] Sc S' t2 Ty H6 Hext). exact (has_type_store_extends [] Sc S' t3 Ty H7 Hext).
   }
-  { (* S_Assign1:52091909 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_Assign2:c3fa3ab3 *) solve [ edestruct IHHstep as (S' & Hext & Hok' & Ht'); eauto; exists S'; split; [exact Hext|split; [exact Hok'|econstructor; eauto using has_type_extends]] ]. }
-  { (* S_AssignV:e98e387c *) exists STy; split; [ apply extends_refl | split; [ match goal with HL : has_type [] _ (Loc _) _ |- _ => inversion HL; subst end | constructor ] ].
-    { (* case_1:997c9f99 *) solve [ eapply heap_update_ok; eauto ]. }
+  { (* case_11:5ade8952 *) destruct (IHHstep (TyArrow T1 Ty) Sc H3 Hok Hlen) as [S' [Hext [Hok' Ht1']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_App with T1. exact Ht1'. exact (has_type_store_extends [] Sc S' t2 T1 H5 Hext).
+  }
+  { (* case_12:01815ed8 *) destruct (IHHstep T1 Sc H6 Hok Hlen) as [S' [Hext [Hok' Ht2']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_App with T1. exact (has_type_store_extends [] Sc S' v1 (TyArrow T1 Ty) H4 Hext). exact Ht2'.
+  }
+  { (* case_13:927a7471 *) exists Sc. split. apply extends_refl. split. exact Hok. inversion H4; subst. apply (subst_typing [] Sc t1 T1 Ty v2); assumption.
+  }
+  { (* case_14:a1109f0f *) exists Sc. split. apply extends_refl. split. exact Hok. apply (subst_typing [] Sc t Ty Ty (Fix t) H2 Ht).
+  }
+  { (* case_15:8c768031 *) destruct (IHHstep T Sc H2 Hok Hlen) as [S' [Hext [Hok' Ht']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_Ref. exact Ht'.
+  }
+  { (* case_16:a96a66a0 *) pose (k := length mu - length Sc). pose (S' := Sc ++ repeat TyNat k ++ [T]). assert (Hext' : extends S' Sc). { unfold S'; unfold extends; exists (repeat TyNat k ++ [T]); reflexivity. } assert (Hvt' : has_type [] S' v T). { apply has_type_store_extends with Sc. exact H3. exact Hext'. } assert (Hn' : nth_error S' (length mu) = Some T). { unfold S'; rewrite app_assoc; rewrite nth_error_app2; [rewrite app_length; rewrite repeat_length; replace (length mu - (length Sc + k)) with 0 by (unfold k; lia); reflexivity| rewrite app_length; rewrite repeat_length; unfold k; lia]. } exists S'; split; [exact Hext'|split; [exact (heap_cons_ok mu Sc S' v T Hok Hext' Hvt' Hn')|exact (T_Loc [] S' (length mu) T Hn')]].
+  }
+  { (* case_17:c3c27fbe *) destruct (IHHstep (TyRef Ty) Sc H2 Hok Hlen) as [S' [Hext [Hok' Ht']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_Deref. exact Ht'.
+  }
+  { (* case_18:97c39c34 *) exists Sc. split. apply extends_refl. split. exact Hok. inversion H3; subst. destruct (heap_lookup_typed mu Sc l v Hok H) as [T' [Hn' Hv]]. rewrite Hn' in H5. injection H5; intro; subst T'. exact Hv.
+  }
+  { (* case_19:b50dd8f6 *) destruct (IHHstep (TyRef T) Sc H3 Hok Hlen) as [S' [Hext [Hok' Ht1']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_Assign with T. exact Ht1'. exact (has_type_store_extends [] Sc S' t2 T H5 Hext).
+  }
+  { (* case_20:c50717ad *) destruct (IHHstep T Sc H5 Hok Hlen) as [S' [Hext [Hok' Ht2']]]. exists S'. split. exact Hext. split. exact Hok'. apply T_Assign with T. exact (has_type_store_extends [] Sc S' (Loc l) (TyRef T) H3 Hext). exact Ht2'.
+  }
+  { (* case_21:0362d92d *) exists Sc. split. apply extends_refl. split. inversion H4. subst. rename H5 into Hn. apply heap_update_ok with T. exact Hok. exact Hn. exact H6. apply T_Num.
   }
 Qed.

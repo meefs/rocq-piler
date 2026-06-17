@@ -38,7 +38,7 @@ describe('split introduces goals', () => {
   afterAll(() => removeTempFixture(tmpFile));
 
   it('split. reports 2 goals and does not Qed', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: 'split.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: 'split.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/2 goal/);
     expect(r.text).not.toMatch(/Qed applied/i);
@@ -74,13 +74,13 @@ describe('induction inside a bullet — full proof', () => {
   afterAll(() => removeTempFixture(tmpFile));
 
   it('split. opens 2 goals', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: 'split.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: 'split.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/2 goal/);
   }, TIMEOUT);
 
   it('- intro n. opens bullet 1, reports 1 focused goal + 1 background', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: '- intro n.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: '- intro n.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/1.*focus.*1.*background|bullet open/i);
     // hypothesis n should appear in goal summary
@@ -88,7 +88,7 @@ describe('induction inside a bullet — full proof', () => {
   }, TIMEOUT);
 
   it('induction n. inside bullet reports 2 focused goals + 1 background', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: 'induction n.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: 'induction n.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/2.*focus.*1.*background|2 at focus/i);
     expect(r.text).not.toMatch(/Qed applied/i);
@@ -101,21 +101,21 @@ describe('induction inside a bullet — full proof', () => {
   }, TIMEOUT);
 
   it('+ simpl. reflexivity. closes base case bullet', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: '+ simpl. reflexivity.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: '+ simpl. reflexivity.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/bullet closed/i);
     expect(r.text).not.toMatch(/Qed applied/i);
   }, TIMEOUT);
 
   it('+ simpl. rewrite IHn. reflexivity. closes step case bullet', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: '+ simpl. rewrite IHn. reflexivity.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: '+ simpl. rewrite IHn. reflexivity.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/bullet closed/i);
     expect(r.text).not.toMatch(/Qed applied/i);
   }, TIMEOUT);
 
   it('- intro n. reflexivity. closes bullet 2 and applies Qed', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: '- intro n. reflexivity.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: '- intro n. reflexivity.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/Qed applied/i);
   }, TIMEOUT);
@@ -149,9 +149,9 @@ describe('induction at top level — no auto-bullet injection', () => {
   afterAll(() => removeTempFixture(tmpFile));
 
   it('induction n. after intro n. reports 2 goals', async () => {
-    await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: 'split.' });
-    await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: '- intro n.' });
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: 'induction n.' });
+    await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: 'split.' });
+    await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: '- intro n.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: 'induction n.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/2.*focus|2 goal/i);
   }, TIMEOUT);
@@ -159,7 +159,7 @@ describe('induction at top level — no auto-bullet injection', () => {
   it('plain tactic after induction gets child bullet prefix, not parent-level prefix', async () => {
     // After induction n. inside a - bullet, there are 2 focused goals.
     // A plain tactic should get a child bullet (e.g. +), NOT a - (parent level).
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: 'simpl.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: 'simpl.' });
     expect(r.isError).toBe(false);
     const content = fs.readFileSync(tmpFile, 'utf8');
     // Must NOT get the parent-level "-" prefix
@@ -190,14 +190,14 @@ describe('inversion inside a proof', () => {
   afterAll(() => removeTempFixture(tmpFile));
 
   it('intros introduces hypotheses, reports 1 goal', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'inversion_test', tactic: 'intros n H.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'inversion_test', tactic: 'intros n H.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/1 goal/);
     expect(r.text).toMatch(/H/); // hypothesis visible in goal summary
   }, TIMEOUT);
 
   it('inversion H. reports 1 goal with new hypothesis H1', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'inversion_test', tactic: 'inversion H.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'inversion_test', tactic: 'inversion H.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/1 goal/);
     expect(r.text).toMatch(/H1/); // inversion introduces H1: n = 5
@@ -211,7 +211,7 @@ describe('inversion inside a proof', () => {
   }, TIMEOUT);
 
   it('subst. closes the remaining goal and applies Qed', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'inversion_test', tactic: 'subst. reflexivity.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'inversion_test', tactic: 'subst. reflexivity.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/Qed applied/i);
     expect(fs.readFileSync(tmpFile, 'utf8')).toContain('Qed.');
@@ -235,34 +235,34 @@ describe('conj_induction — induction with split inside each bullet', () => {
   afterAll(() => removeTempFixture(tmpFile));
 
   it('induction n. opens 2 goals (base and step)', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'conj_induction', tactic: 'induction n.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'conj_induction', tactic: 'induction n.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/2 goal/);
     expect(r.text).not.toMatch(/Qed applied/i);
   }, TIMEOUT);
 
   it('- split. opens 2 sub-goals inside base case bullet', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'conj_induction', tactic: '- split.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'conj_induction', tactic: '- split.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/2.*focus.*background|2 at focus/i);
   }, TIMEOUT);
 
   it('+ reflexivity. closes first base conjunct', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'conj_induction', tactic: '+ reflexivity.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'conj_induction', tactic: '+ reflexivity.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/bullet closed/i);
     expect(r.text).not.toMatch(/Qed applied/i);
   }, TIMEOUT);
 
   it('+ reflexivity. closes second base conjunct, step case remains', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'conj_induction', tactic: '+ reflexivity.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'conj_induction', tactic: '+ reflexivity.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/bullet closed/i);
     expect(r.text).not.toMatch(/Qed applied/i);
   }, TIMEOUT);
 
   it('- destruct IHn as [IH1 IH2]. opens step case with IH1 and IH2 in context', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'conj_induction', tactic: '- destruct IHn as [IH1 IH2].' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'conj_induction', tactic: '- destruct IHn as [IH1 IH2].' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/IH1/);
     expect(r.text).toMatch(/IH2/);
@@ -270,27 +270,27 @@ describe('conj_induction — induction with split inside each bullet', () => {
   }, TIMEOUT);
 
   it('split. inside step bullet opens 2 sub-goals', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'conj_induction', tactic: 'split.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'conj_induction', tactic: 'split.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/2 goal/);
     expect(r.text).not.toMatch(/Qed applied/i);
   }, TIMEOUT);
 
   it('+ simpl. rewrite IH1. reflexivity. closes first step conjunct', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'conj_induction', tactic: '+ simpl. rewrite IH1. reflexivity.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'conj_induction', tactic: '+ simpl. rewrite IH1. reflexivity.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/bullet closed/i);
   }, TIMEOUT);
 
   it('+ simpl. reduces second step conjunct to S n = S n', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'conj_induction', tactic: '+ simpl.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'conj_induction', tactic: '+ simpl.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/1 goal/);
     expect(r.text).not.toMatch(/Qed applied/i);
   }, TIMEOUT);
 
   it('reflexivity. closes final goal and applies Qed', async () => {
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'conj_induction', tactic: 'reflexivity.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'conj_induction', tactic: 'reflexivity.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/Qed applied/i);
   }, TIMEOUT);
@@ -323,10 +323,10 @@ describe('goal-introducing tactic errors', () => {
   afterAll(() => removeTempFixture(tmpFile));
 
   it('induction on wrong variable fails gracefully without corrupting file', async () => {
-    await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: 'split.' });
-    await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: '- intro n.' });
+    await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: 'split.' });
+    await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: '- intro n.' });
     // induction on a non-inductive term should fail
-    const r = await h.callTool('insert_tactic', { file: tmpFile, name: 'induction_in_bullet', tactic: 'induction 42.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile, name: 'induction_in_bullet', tactic: 'induction 42.' });
     // Either rolled back with error in text, or isError — but file must still be valid
     const check = await h.callTool('check_file', { file: tmpFile });
     expect(check.isError).toBe(false);
@@ -350,8 +350,8 @@ describe('goal-introducing tactic errors', () => {
       '',
     ].join('\n'));
     await h.callTool('check_file', { file: tmpFile2 });
-    await h.callTool('insert_tactic', { file: tmpFile2, name: 'only_nat', tactic: 'intro n.' });
-    const r = await h.callTool('insert_tactic', { file: tmpFile2, name: 'only_nat', tactic: 'exact true.' });
+    await h.callTool('insert_tactics', { file: tmpFile2, name: 'only_nat', tactic: 'intro n.' });
+    const r = await h.callTool('insert_tactics', { file: tmpFile2, name: 'only_nat', tactic: 'exact true.' });
     // Tactic inserted, proof still open — not Qed'd
     expect(r.text).toMatch(/1 goal/);
     expect(r.text).not.toMatch(/Qed applied/i);

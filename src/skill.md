@@ -8,7 +8,7 @@ This document provides guidance for completing Coq/Rocq proofs using the `coq-ls
 
 | Tool | Purpose |
 |------|---------|
-| `focus_proof` | Get the current proof tree: goals, bullet depth, proof script up to cursor. Sets file cursor for subsequent `insert_tactic`. Accepts proof name or explicit position. |
+| `focus_proof` | Get the current proof tree: goals, bullet depth, proof script up to cursor. Sets file cursor for subsequent `insert_tactics`. Accepts proof name or explicit position. |
 | `open_goals` | Get current open goals for a named proof (Prev mode by default). |
 | `proof_state` | Get richer proof context including proof name and statement. |
 | `check_file` | Force full document checking and return completion status. |
@@ -18,8 +18,8 @@ This document provides guidance for completing Coq/Rocq proofs using the `coq-ls
 
 | Tool | Purpose |
 |------|---------|
-| `insert_tactic` | Insert a tactic into a proof and return updated goals. **Auto-prepends bullet prefix** (-, +, *) when proof state requires it. Use `replace: true` to retry a failed tactic (undoes last insertion first). |
-| `try_step` | Single-call speculative tactic execution: get state, run tactic, return updated goals. Does NOT modify the file. Use to test a tactic before committing. |
+| `insert_tactics` | Insert a tactic into a proof and return updated goals. **Auto-prepends bullet prefix** (-, +, *) when proof state requires it. Use `replace: true` to retry a failed tactic (undoes last insertion first). |
+| `insert_tactics (dry_run:true)` | Single-call speculative tactic execution: get state, run tactic, return updated goals. Does NOT modify the file. Use to test a tactic before committing. |
 | `undo_step` | Restore the file to before the last N edit operations. |
 
 ### Lemma Management
@@ -44,6 +44,78 @@ This document provides guidance for completing Coq/Rocq proofs using the `coq-ls
 | Tool | Purpose |
 |------|---------|
 | `edit_file` | Apply text edits to a file and re-sync with rocq-lsp. Use `find`/`replace` for simple text search-and-replace instead of computing line numbers. |
+
+## The Primary Proof Loop
+
+For multi-case induction proofs (5–25 subgoals), use this cycle:
+
+```
+stratify → survivors with hashes → insert_tactics admit_hash=<X> → repeat
+```
+
+### Step-by-step
+
+**1. Add any helper lemmas first.** Use `search_lemmas` to find existing ones. Use `add_lemma` with `before="<theorem>"` to create new ones. Prove them before touching the main theorem.
+
+**2. Run `stratify`** on the main proof:
+
+```
+stratify name="preservation" skeleton="intros; revert ...; induction H; intros; inversion Ht; subst"
+         portfolio=["eauto","exists S; split; [apply extends_refl | split; assumption]"]
+         cases_from="step"
+         file="proof.v"
+```
+
+This skeleton+portfolio auto-closes the easy cases and reports survivors with **8-char hex hashes** (e.g. `S_Succ:21f2b37f`). Each survivor is a labelled `{ (* CaseName:hash *) admit. }` block.
+
+**3. Tackle survivors one at a time.** For each, dry-run first to confirm the tactic works:
+
+```
+insert_tactics admit_hash="21f2b37f" dry_run=true tactic="pose proof (IH ...) as ..." ...
+```
+
+If it returns `→ 0 goal(s)`, commit it without `dry_run`:
+
+```
+insert_tactics admit_hash="21f2b37f" tactic="pose proof (IH ...) as ..." ...
+```
+
+**4. If a tactic opens new subgoals** (e.g. `econstructor; eauto` requires a weakening lemma), the tool generates **nested sub-admit blocks** with fresh hashes. Resolve them the same way:
+
+```
+// S_If:econstructor; eauto → generates sub-admits 611282a4 and 1e4bab4d
+insert_tactics admit_hash="611282a4" tactic="eapply has_type_extends; eauto" ...
+insert_tactics admit_hash="1e4bab4d" tactic="eapply has_type_extends; eauto" ...
+```
+
+**5. When all admits vanish**, the proof auto-Qeds. Verify with `check_file`.
+
+### The `pose proof` pattern (reliable for IH cases)
+
+This is the preferred tactic style for inductive-step survivors — use `pose proof` with explicit arguments instead of `edestruct` + `eauto`:
+
+```
+pose proof (IHHstep STy TyNat H2 Hok Hlen) as [S' H];
+destruct H as [Hext [Hok' Ht']];
+exists S'; split; [exact Hext | split; [exact Hok' | econstructor; exact Ht']]
+```
+
+Why: `eexists` after `edestruct` creates a fresh existential that `eauto` can't unify with the IH witness. `pose proof` → named `destruct` → explicit `exists S'` avoids this.
+
+### When to use `edit_file` instead
+
+If >5 survivors remain and you know the complete proof body, use `edit_file` with `find`/`replace` to write them all at once. This is faster than individual `admit_hash` calls. Prefer individual resolution when the survivor count is small and tactics differ per case.
+
+### Common survivor patterns
+
+| Pattern | Tactic template |
+|---------|----------------|
+| Simple IH (no store extension) | `pose proof (IHHstep STy TyNat H2 Hok Hlen) as [S' H]; destruct H as [Hext [Hok' Ht']]; exists S'; split; [exact Hext \| split; [exact Hok' \| econstructor; exact Ht']]` |
+| IH requiring `has_type_extends` | Same as above but final `econstructor; [exact Ht' \| eapply has_type_extends; eauto]` (or `eapply has_type_extends; eauto \| exact Ht'` depending on premise order) |
+| Inversion-first + IH | `inversion H4; subst. pose proof (IHHstep ...) ...` |
+| Store extension (S_RefV style) | `exists (STy ++ [T]); split; [\| split]. - unfold extends; ... - apply heap_cons; ... - apply T_Loc; ...` |
+| Lemma lookup (heap_ok_lookup) | `inversion H3; subst. edestruct heap_ok_lookup as [? []]; eauto. exists STy; split; ...` |
+| Lemma update (heap_ok_update) | `inversion H4; subst. eapply heap_ok_update; eauto. exists STy; split; ...` |
 
 ## Proof Strategy
 
@@ -115,16 +187,16 @@ search_lemmas file="path/file.v" pattern="(_ ++ [])"  # Now finds app_nil_r
 ### 6. Recognising when a bullet needs a lemma
 
 When `insert_tactic admit_hash` re-seals repeatedly with the same goal — or when
-`try_step` on the remaining goal says a name is not found — the bullet needs a
+`insert_tactics (dry_run:true)` on the remaining goal says a name is not found — the bullet needs a
 helper lemma that isn't in scope yet.
 
-**Diagnostic**: use `try_step` on the re-sealed admit to see the full hypothesis
+**Diagnostic**: use `insert_tactics (dry_run:true)` on the re-sealed admit to see the full hypothesis
 context. If the goal mentions a term (e.g. `S'` extending `S`) but the hypotheses
 only provide facts about `S`, you need a weakening/monotonicity lemma.
 
 **Workflow**:
 
-1. Note the missing property from `try_step` output.
+1. Note the missing property from `insert_tactics (dry_run:true)` output.
 2. Check if it already exists:
    ```
    search_lemmas pattern="has_type (_ ++ _)"
@@ -136,9 +208,9 @@ only provide facts about `S`, you need a weakening/monotonicity lemma.
              statement="forall G S S2 t T, has_type G S t T -> has_type G (S ++ S2) t T"
              before="preservation"
    ```
-4. Prove the helper with `insert_tactic` (often a one-liner: `intros; induction Hty; eauto using has_type.`).
+4. Prove the helper with `insert_tactics` (often a one-liner: `intros; induction Hty; eauto using has_type.`).
 5. Return to the main proof — the lemma is now in scope. Use the hash from the
-   last `insert_tactic` response (no fresh `list_admitted` needed) to continue.
+   last `insert_tactics` response (no fresh `list_admitted` needed) to continue.
 
 **Common helpers for preservation proofs**:
 
@@ -325,7 +397,7 @@ When proving a large theorem, add lemmas in dependency order:
 
 4. **Test tactics using the library**:
    ```coq
-   try_step file="proof.v" name="my_theorem" tactic="rewrite app_nil_r."
+   insert_tactics (dry_run:true) file="proof.v" name="my_theorem" tactic="rewrite app_nil_r."
    # Tests if the tactic works without modifying the file
    ```
 
@@ -379,7 +451,7 @@ check_file file="path/file.v"
 
 ### Proof out of sync
 
-If `insert_tactic` inserts at the wrong position, use `focus_proof` to reset the cursor:
+If `insert_tactics` inserts at the wrong position, use `focus_proof` to reset the cursor:
 ```coq
 focus_proof name="my_theorem" file="path/file.v"
 ```
@@ -392,7 +464,7 @@ focus_proof name="my_theorem" file="path/file.v"
 
 Use `replace: true` to undo the last insertion and retry:
 ```coq
-insert_tactic name="my_theorem" tactic="reflexivity." file="path/file.v" replace=true
+insert_tactics name="my_theorem" tactic="reflexivity." file="path/file.v" replace=true
 ```
 
 ### Placing bullet skeletons for partial proofs
@@ -405,14 +477,14 @@ An empty bullet `- (* comment *)` is a **syntax error** in Coq — every bullet 
 - (* S_RefV *)   admit.
 ```
 
-Use `edit_file` with `find`/`replace` to insert the full skeleton at once, then `list_admitted` to enumerate the stubs and work through them with `insert_tactic` + `admit_hash`.
+Use `edit_file` with `find`/`replace` to insert the full skeleton at once, then `stratify` or `focus_proof` to enumerate the stubs and work through them with `insert_tactics` + `admit_hash`.
 
-### Multi-line tactics in `insert_tactic`
+### Multi-line tactics in `insert_tactics`
 
-`insert_tactic` writes the full tactic string to the file as-is — multi-line blocks, sequences of `.`-terminated tactics, and `;`-chains all work:
+`insert_tactics` writes the full tactic string to the file as-is — multi-line blocks, sequences of `.`-terminated tactics, and `;`-chains all work:
 
 ```coq
-insert_tactic tactic="inversion Hty; subst.
+insert_tactics tactic="inversion Hty; subst.
   destruct (IHHstep TyNat S H2 Hok) as [S' [? [? ?]]].
   exists S'; eauto using T_Succ."
 ```

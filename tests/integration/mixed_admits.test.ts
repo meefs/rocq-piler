@@ -122,7 +122,7 @@ describe('insert_tactic admit_hash on mixed goals', () => {
   it('replacing True hash closes exactly 2 admits, leaves 2 nat admits', async () => {
     expect(countAdmitsInProof(tmpFile, 'mixed_four')).toBe(4);
 
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'mixed_four',
       tactic: 'exact I.',
@@ -139,7 +139,7 @@ describe('insert_tactic admit_hash on mixed goals', () => {
   });
 
   it('replacing nat hash closes the remaining 2 nat admits', async () => {
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'mixed_four',
       tactic: 'tauto.',
@@ -191,7 +191,7 @@ describe('insert_tactic admit_hash on mixed_partial', () => {
     const before = countAdmitsInProof(tmpFile, 'mixed_partial');
     expect(before).toBe(3);
 
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'mixed_partial',
       tactic: 'exact I.',
@@ -203,7 +203,7 @@ describe('insert_tactic admit_hash on mixed_partial', () => {
   });
 
   it('replacing (True->True) hash closes both remaining implication admits', async () => {
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'mixed_partial',
       tactic: 'tauto.',
@@ -236,7 +236,7 @@ describe('insert_tactic admit_hash on all_true', () => {
   it('single admit_hash call replaces all 4 admits at once', async () => {
     expect(countAdmitsInProof(tmpFile, 'all_true')).toBe(4);
 
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'all_true',
       tactic: 'exact I.',
@@ -261,7 +261,7 @@ describe('insert_tactic admit_hash on all_true', () => {
 
 describe('admit_hash error cases', () => {
   it('unknown hash returns an error', async () => {
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: MIXED,
       name: 'mixed_four',
       tactic: 'exact I.',
@@ -279,7 +279,7 @@ describe('admit_hash error cases', () => {
     const implHash2 = extractAdmitHashes(list.text).find(a => a.goal.includes('True -> True'))?.hash ?? '';
 
     // exact I. is wrong type for (True -> True) goal — should fail or not corrupt file
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile2,
       name: 'mixed_four',
       tactic: 'exact I.',

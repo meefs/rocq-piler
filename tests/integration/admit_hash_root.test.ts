@@ -48,7 +48,7 @@ describe('root Admitted. with single goal', () => {
     expect(hash).toBeTruthy();
     expect(hash).not.toBe('error');
 
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'single_goal',
       tactic: 'exact I.',
@@ -85,10 +85,10 @@ describe('root Admitted. with multiple goals (after split.)', () => {
     expect(admits[0].goal.split(' | ')).toHaveLength(2);
   }, TIMEOUT);
 
-  it('focus_proof includes hint about bulleting N goals', async () => {
+  it('focus_proof includes hint about brace admits for N goals', async () => {
     const r = await h.callTool('focus_proof', { file: tmpFile, name: 'multi_goal' });
-    expect(r.text).toMatch(/2 focused goals/);
-    expect(r.text).toMatch(/bulleted admits/i);
+    expect(r.isError).toBe(false);
+    expect(r.text).toMatch(/brace admits/i);
   }, TIMEOUT);
 
   it('hash from focus_proof matches insert_tactic admit_hash for multi-goal Admitted.', async () => {
@@ -99,7 +99,7 @@ describe('root Admitted. with multiple goals (after split.)', () => {
 
     // The hash is valid — insert_tactic must find it (no "No admit found" error)
     // Use "- exact I." to close the first focused goal under the implicit bullet
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'multi_goal',
       tactic: '- exact I.',
@@ -134,7 +134,7 @@ describe('auto-Qed must not fire with background goals remaining', () => {
     expect(hash).toBeTruthy();
 
     // Close first goal with a bullet — second goal still in background
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile, name: 'multi_goal', tactic: '- exact I.', admit_hash: hash,
     });
     expect(r.isError).toBe(false);
@@ -158,7 +158,7 @@ describe('auto-Qed must not fire with background goals remaining', () => {
     const hash = extractAdmitHashes(focus.text)[0]?.hash;
     expect(hash).toBeTruthy();
 
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile, name: 'multi_goal', tactic: '- exact I.', admit_hash: hash,
     });
     expect(r.isError).toBe(false);
@@ -191,7 +191,7 @@ describe('admit_hash: closing tactic must not re-seal', () => {
 
     // Close first admit with a goal-closing tactic
     const hash = admits[0].hash;
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'has_admits',
       tactic: 'exact I.',
@@ -219,7 +219,7 @@ describe('admit_hash: closing tactic must not re-seal', () => {
     const hash = extractAdmitHashes(focus.text)[0]?.hash;
     expect(hash).toBeTruthy();
 
-    const r = await h.callTool('insert_tactic', {
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile,
       name: 'nested_conj',
       tactic: 'split.',

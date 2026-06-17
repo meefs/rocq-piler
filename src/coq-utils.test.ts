@@ -975,15 +975,15 @@ describe('replaceAdmitLine', () => {
     const rlines = afterReplace.split('\n');
     const bracketLine = rlines.findIndex(l => l.trim() === '}');
     expect(bracketLine).toBeGreaterThanOrEqual(0);
-    // 2. Simulate sealOpenGoals: insert 1 admit BEFORE the closing }
+    // 2. Simulate sealOpenGoals: insert { admit. } BEFORE the closing }
     const sealed = applyTextEdits(afterReplace, [{
       range: { start: { line: bracketLine, character: 0 }, end: { line: bracketLine, character: 0 } },
-      newText: '    admit.\n',
+      newText: '    { admit. }\n',
     }]);
     // Admit goes BEFORE closing }
     const sealedLines = sealed.split('\n');
     expect(sealedLines[bracketLine - 1]).toContain('{ (* T_Var:eb261139 *) split.');
-    expect(sealedLines[bracketLine]).toContain('    admit.');
+    expect(sealedLines[bracketLine]).toContain('{ admit. }');
     // The closing } should be at original indent, before Admitted.
     expect(sealedLines[bracketLine + 1]).toBe('  }');
     // Admitted. must come after the closing brace
@@ -998,13 +998,14 @@ describe('replaceAdmitLine', () => {
 describe('full admit workflow (deterministic)', () => {
   // Simulates: add_lemma → insert_tactic (split) → insert_tactic (admit) × 3
   // → list_admitted → insert_tactic (admit_hash=X) → replace + insert + re-seal
+  // Uses { } brace bullets exclusively.
   const built = (() => {
     let text = 'Lemma foo : True /\\ True /\\ True.\nProof.\nAdmitted.';
     text = insertTactic(text, 'split.', 'foo');
-    text = insertTactic(text, 'admit.', 'foo', { bullet: '-' });
-    text = insertTactic(text, 'split.', 'foo', { bullet: '-' });
-    text = insertTactic(text, 'admit.', 'foo', { bullet: '+' });
-    text = insertTactic(text, 'admit.', 'foo', { bullet: '+' });
+    text = insertTactic(text, 'admit.', 'foo', { bullet: '{' });
+    text = insertTactic(text, 'split.', 'foo', { bullet: '{' });
+    text = insertTactic(text, 'admit.', 'foo', { bullet: '{' });
+    text = insertTactic(text, 'admit.', 'foo', { bullet: '{' });
     return text;
   })();
 
@@ -1016,21 +1017,24 @@ describe('full admit workflow (deterministic)', () => {
     expect(admits).toHaveLength(3);
   });
 
-  it('replaces first (-) admit', () => {
+  it('replaces first ({) admit', () => {
     const bounds = proofBounds(built.split('\n'), 'foo')!;
     const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
     const result = replaceAdmitLine(built, admits[0], 'exact I.');
-    expect(result).toContain('- exact I.');
-    expect(result).not.toContain('- admit.');
-    expect(result).toContain('+ admit.'); // other admits survive
+    // First admit replaced — exact I. now appears at its position
+    const resultLines = result.split('\n');
+    expect(resultLines[admits[0]]).toContain('{ exact I.');
+    expect(resultLines[admits[0]]).not.toContain('{ admit.');
+    // Other admits survive
+    expect(result.split('\n').filter(l => l.includes('admit.')).length).toBe(2);
   });
 
-  it('replaces nested (+) admit', () => {
+  it('replaces nested ({) admit', () => {
     const bounds = proofBounds(built.split('\n'), 'foo')!;
     const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
-    const line = admits.find(l => built.split('\n')[l].includes('+ admit.'))!;
+    const line = admits.find(l => built.split('\n')[l].includes('{ admit.'))!;
     const result = replaceAdmitLine(built, line, 'split.');
-    expect(result).toContain('+ split.');
+    expect(result).toContain('{ split.');
     const resultLines = result.split('\n');
     const remaining = resultLines.filter(l => l.includes('admit.'));
     expect(remaining).toHaveLength(2); // other two admits still exist
@@ -1040,9 +1044,11 @@ describe('full admit workflow (deterministic)', () => {
     const bounds = proofBounds(built.split('\n'), 'foo')!;
     const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
     const result = replaceAdmitLine(built, admits[1], 'exact I.');
-    expect(result).toContain('- admit.');    // first admit still there
-    expect(result).toContain('+ exact I.'); // replaced
-    expect(result).toContain('+ admit.');   // other admit survives
+    const resultLines = result.split('\n');
+    // Replaced line now has exact I.
+    expect(resultLines[admits[1]]).toContain('{ exact I.');
+    // Other two admits survive (3 total admits - 1 replaced = 2 remaining)
+    expect(resultLines.filter(l => l.includes('admit.')).length).toBe(2);
   });
 
   it('replacing last admit leaves proof with all bullets at same levels', () => {
@@ -1050,8 +1056,7 @@ describe('full admit workflow (deterministic)', () => {
     const admits = findAdmitLines(built.split('\n'), bounds.proofLine, bounds.endLine);
     const result = replaceAdmitLine(built, admits[2], 'exact I.');
     const lines = result.split('\n');
-    const bullets = lines.filter(l => /^\s*[-+*]/.test(l.trim()));
-    // Should have: - admit., + admit., + exact I. (re-seal adds one)
+    const bullets = lines.filter(l => /^\s*\{/.test(l.trim()));
     expect(bullets.length).toBeGreaterThanOrEqual(3);
   });
 });
@@ -1191,23 +1196,23 @@ describe('sealOpenGoals', () => {
     expect(sealMsg).toBe('');
   });
 
-  it('nOpen=1 — inserts single flat admit after tactic line', () => {
+  it('nOpen=1 — inserts { admit. } brace at child indent', () => {
     const { text: out, sealMsg } = sealOpenGoals(proof, 3, 1, '- intro n.');
     const lines = out.split('\n');
-    // parent "- " at indent 0 → tactic indent = 0 + 1 + 1 = 2
-    expect(lines[4]).toMatch(/^ {2}admit\.$/);
+    // parent "- intro n." at indent 0 → child indent = 2
+    expect(lines[4]).toBe('  { admit. }');
     expect(sealMsg).toMatch(/1 goal/);
   });
 
-  it('nOpen=2 under "-" parent — child token is "+"', () => {
+  it('nOpen=2 under "-" parent — inserts two brace admits', () => {
     const { text: out, sealMsg } = sealOpenGoals(proof, 3, 2, '- intro n.');
     const lines = out.split('\n');
-    expect(lines[4]).toBe('  + admit.');
-    expect(lines[5]).toBe('  + admit.');
+    expect(lines[4]).toBe('  { admit. }');
+    expect(lines[5]).toBe('  { admit. }');
     expect(sealMsg).toMatch(/2 admit/);
   });
 
-  it('nOpen=2 under "+" parent — child token is "*"', () => {
+  it('nOpen=2 under "+" parent — inserts two brace admits at child indent', () => {
     const text = [
       'Lemma foo : True.',
       'Proof.',
@@ -1217,19 +1222,19 @@ describe('sealOpenGoals', () => {
     ].join('\n');
     const { text: out } = sealOpenGoals(text, 3, 2, '  + intro n.');
     const lines = out.split('\n');
-    expect(lines[4]).toBe('    * admit.');
-    expect(lines[5]).toBe('    * admit.');
+    expect(lines[4]).toBe('    { admit. }');
+    expect(lines[5]).toBe('    { admit. }');
   });
 
-  it('nOpen=3 — inserts 3 child-bulleted admits', () => {
+  it('nOpen=3 — inserts 3 brace admits', () => {
     const { text: out } = sealOpenGoals(proof, 3, 3, '- intro n.');
     const lines = out.split('\n');
-    expect(lines[4]).toBe('  + admit.');
-    expect(lines[5]).toBe('  + admit.');
-    expect(lines[6]).toBe('  + admit.');
+    expect(lines[4]).toBe('  { admit. }');
+    expect(lines[5]).toBe('  { admit. }');
+    expect(lines[6]).toBe('  { admit. }');
   });
 
-  it('no parent bullet line — inserts admit with 2-space fallback indent', () => {
+  it('no parent bullet line — inserts brace admit with 2-space fallback indent', () => {
     const text = [
       'Lemma foo : True.',
       'Proof.',
@@ -1238,7 +1243,7 @@ describe('sealOpenGoals', () => {
     ].join('\n');
     const { text: out } = sealOpenGoals(text, 2, 1, undefined);
     const lines = out.split('\n');
-    expect(lines[3]).toMatch(/admit\./);
+    expect(lines[3]).toBe('  { admit. }');
   });
 });
 

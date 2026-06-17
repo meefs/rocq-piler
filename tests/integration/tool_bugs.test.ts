@@ -37,8 +37,8 @@ describe('Bug #1 — open_goals after compound tactic (induction)', () => {
   afterAll(() => removeTempFixture(tmpFile));
 
   it('induction n. reports 2 focused goals, not 0', async () => {
-    await h.callTool('insert_tactic', { file: tmpFile, name: 'bug_compound_induction', tactic: 'intro n.' });
-    const r = await h.callTool('insert_tactic', {
+    await h.callTool('insert_tactics', { file: tmpFile, name: 'bug_compound_induction', tactic: 'intro n.' });
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile, name: 'bug_compound_induction', tactic: 'induction n.',
     });
     expect(r.isError).toBe(false);
@@ -105,7 +105,7 @@ describe('Bug #3 — reset_proof targets the correct proof', () => {
     tmpFile = tempFixture('tool_bugs.v', 'bug3');
     await h.callTool('check_file', { file: tmpFile });
     // Pre-insert a tactic so we can tell if the wrong proof was reset
-    await h.callTool('insert_tactic', { file: tmpFile, name: 'bug_reset_target_a', tactic: 'exact I.' });
+    await h.callTool('insert_tactics', { file: tmpFile, name: 'bug_reset_target_a', tactic: 'exact I.' });
   }, TIMEOUT);
   afterAll(() => removeTempFixture(tmpFile));
 
@@ -228,7 +228,7 @@ describe('Bug #8 — add_lemma + reset_proof do not corrupt file', () => {
     expect(r1.isError).toBe(false);
 
     // Step 2: Insert a tactic into the new lemma
-    await h.callTool('insert_tactic', {
+    await h.callTool('insert_tactics', {
       file: tmpFile, name: 'bug8_new_lemma', tactic: 'exact I.',
     });
 
@@ -322,8 +322,8 @@ describe('Bug #1 variant — open_goals after split.', () => {
     // First: intro n. then induction n. which produces 2 goals,
     // close them and use a sub-case
     // Actually bug_compound_induction has "forall n, n + 0 = n" — let's test on a conjunction
-    await h.callTool('insert_tactic', { file: tmpFile, name: 'bug_compound_induction', tactic: 'intro n.' });
-    const r = await h.callTool('insert_tactic', {
+    await h.callTool('insert_tactics', { file: tmpFile, name: 'bug_compound_induction', tactic: 'intro n.' });
+    const r = await h.callTool('insert_tactics', {
       file: tmpFile, name: 'bug_compound_induction', tactic: 'induction n.',
     });
     expect(r.text).toMatch(/2 goal/);

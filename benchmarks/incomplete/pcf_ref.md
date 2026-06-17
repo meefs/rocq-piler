@@ -33,6 +33,12 @@ preservation theorem with `Admitted`. You must:
    invariants, store extension lemmas, etc.)
 2. Complete the preservation proof with no remaining admits
 
+## Constraints
+
+- You MUST use the rocq-piler MCP tools to complete the proof — do NOT
+  edit the `.v` file directly with text edits. Use `stratify`,
+  `insert_tactics`, `close_admits`, `add_lemma`, etc.
+
 ## File
 
 `benchmarks/incomplete/pcf_ref.v` — the challenge (Admitted)

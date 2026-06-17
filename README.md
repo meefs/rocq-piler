@@ -297,10 +297,26 @@ See `examples/dep_vec.v` for a complete, working example of a simple dependently
 
 Both proofs use the same pattern: `focus_proof` → multi-line stub → case hashes with hyps+goal → close by hash one-by-one.
 
-A larger PCF+References example is in `examples/test_issues.v`:
-- ✅ 7 helper lemmas + preservation theorem (21 cases)  
-- ✅ Full heap semantics with store extension and weakening  
-- ✅ All cases closed with `Qed`
+A larger PCF+References benchmark is in `benchmarks/complete/pcf_ref.v`:
+- ✅ 9 helper lemmas + preservation theorem (21 cases)  
+- ✅ Full heap semantics with store extension, weakening, and substitution  
+- ✅ All cases closed with `Qed`  
+- ✅ **Total cost: 4 cents** ($0.0351 actual, 50 API calls, DeepSeek V4)
+
+## Benchmarks
+
+| Benchmark | Theorem | Cases | Lemmas | API Calls | Cost |
+|-----------|---------|-------|--------|-----------|------|
+| Dep Vec (`dep_vec.v`) | Preservation + Progress | 7+7 | 0 | 18 | — |
+| PCF + Ref (`pcf_ref.v`) | Preservation | 21 | 9 | 50 | $0.04 |
+
+### PCF + References (Type Preservation)
+
+A PCF language extended with mutable references (allocation, dereference, assignment), heap semantics, and store typing. The preservation theorem establishes that well-typed programs remain well-typed after a step, with the store typing possibly extended.
+
+**Auxiliary lemmas proved**: `extends_refl`, `extends_trans`, `nth_error_extends`, `store_weakening`, `shift_typing`, `subst_typing`, `heap_ok_extends`, `heap_lookup_has_type`, `heap_ok_update`
+
+**Source**: `benchmarks/incomplete/pcf_ref.v` (challenge) → `benchmarks/complete/pcf_ref.v` (solution)
 
 ## Additional Examples
 

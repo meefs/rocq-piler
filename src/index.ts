@@ -33,6 +33,18 @@ import { createHash } from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// --- Experiment feature flags (paper ablation: positional vs content-addressed) ---
+// POSITIONAL_ONLY: expose ONLY a positional editing surface (edit_file + check_file),
+//   removing the content-addressed / batch machinery (focus_proof, insert_tactics,
+//   stratify, close_admits, etc.). This is the baseline arm for the SEFM ablation.
+// ENABLE_EDIT_FILE: re-register the positional edit_file tool alongside the normal
+//   tool set (edit_file was pruned in v0.8.0). Implied by POSITIONAL_ONLY.
+const POSITIONAL_ONLY = process.env.ROCQ_PILER_POSITIONAL_ONLY === '1';
+const ENABLE_EDIT_FILE =
+  POSITIONAL_ONLY || process.env.ROCQ_PILER_ENABLE_EDIT_FILE === '1';
+// In positional-only mode, this is the entire allowed tool surface.
+const POSITIONAL_TOOLS = new Set(['edit_file', 'check_file']);
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -347,8 +359,46 @@ async function main() {
 
   // Tool: coq_open_goals
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
+    const allTools = [
+        ...(ENABLE_EDIT_FILE ? [{
+          name: 'edit_file',
+          description: 'Apply text edits to a file and re-sync with rocq-lsp. Use "find"/"replace" for simple text search-and-replace instead of computing line numbers.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string' },
+              find: { type: 'string', description: 'Text to search for (use instead of edits for simple replacements)' },
+              replace: { type: 'string', description: 'Replacement text (use with find)' },
+              edits: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    range: {
+                      type: 'object',
+                      properties: {
+                        start: {
+                          type: 'object',
+                          properties: { line: { type: 'number' }, character: { type: 'number' } },
+                          required: ['line', 'character'],
+                        },
+                        end: {
+                          type: 'object',
+                          properties: { line: { type: 'number' }, character: { type: 'number' } },
+                          required: ['line', 'character'],
+                        },
+                      },
+                      required: ['start', 'end'],
+                    },
+                    newText: { type: 'string' },
+                  },
+                  required: ['range', 'newText'],
+                },
+              },
+            },
+            required: ['file'],
+          },
+        }] : []),
 
 
 
@@ -645,8 +695,11 @@ async function main() {
             required: ['file', 'name'],
           },
         },
-      ],
-    };
+    ];
+    const tools = POSITIONAL_ONLY
+      ? allTools.filter((t) => POSITIONAL_TOOLS.has(t.name))
+      : allTools;
+    return { tools };
   });
 
   // Tool handler
@@ -848,8 +901,92 @@ async function main() {
     }
 
     try {
+      // Ablation guard: in positional-only mode, refuse any tool outside the
+      // positional surface even if a client tries to call it directly.
+      if (POSITIONAL_ONLY && !POSITIONAL_TOOLS.has(name)) {
+        return reply(
+          `tool '${name}' disabled in positional-only mode (ROCQ_PILER_POSITIONAL_ONLY=1)`,
+          { disabled: true, tool: name }
+        );
+      }
       switch (name) {
 
+        case 'edit_file': {
+          const { file, edits, find, replace } = args as {
+            file: string;
+            edits?: Array<{ range: Range; newText: string }>;
+            find?: string;
+            replace?: string;
+          };
+
+          // Get current document
+          let doc = docManager.getDocument(file);
+          if (!doc) {
+            doc = await ensureDocumentOpened(file);
+          }
+
+          // Resolve edits: either from explicit ranges or from text search
+          let resolvedEdits: Array<{ range: Range; newText: string }>;
+          if (find !== undefined) {
+            const idx = doc.text.indexOf(find);
+            if (idx === -1) {
+              return reply(`text not found: "${find.substring(0, 80)}"`, { found: false });
+            }
+            const before = doc.text.substring(0, idx);
+            const beforeLines = before.split('\n');
+            const findLines = find.split('\n');
+            const startLine = beforeLines.length - 1;
+            const startChar = beforeLines[beforeLines.length - 1].length;
+            const endLine = startLine + (findLines.length - 1);
+            const endChar = findLines.length === 1
+              ? startChar + find.length
+              : findLines[findLines.length - 1].length;
+            resolvedEdits = [{
+              range: {
+                start: { line: startLine, character: startChar },
+                end: { line: endLine, character: endChar },
+              },
+              newText: replace ?? '',
+            }];
+          } else {
+            resolvedEdits = edits || [];
+          }
+
+          // Apply edits
+          pushFileHistory(file, doc.text, currentProof.get(file));
+          const newText = docManager.applyEdits(doc.text, resolvedEdits);
+
+          // Update and save
+          await docManager.updateDocument(file, newText);
+          await docManager.saveDocument(file);
+
+          // Force LSP to re-process after bulk edit — close + reopen
+          // to drop stale bindings from the old file state.
+          try {
+            await docManager.closeDocument(file);
+            const reopened = await ensureDocumentOpened(file);
+            await retryDocumentNotReady(() =>
+              lspClient.sendRequest('coq/getDocument', {
+                textDocument: {
+                  uri: reopened.uri,
+                  version: reopened.version,
+                },
+              })
+            );
+          } catch (e) {
+            console.error('[edit_file] re-sync failed:', e);
+          }
+
+          const updatedDoc = docManager.getDocument(file)!;
+
+          const summary = find !== undefined
+            ? `replaced "${find.substring(0, 40)}${find.length > 40 ? '…' : ''}"`
+            : `applied ${resolvedEdits.length} edit(s)`;
+          return reply(
+            `${fileLine(file, 0)} — ${summary}, v${updatedDoc.version}`,
+            { file, new_version: updatedDoc.version, found: true }
+          );
+        }
 
         case 'focus_proof': {
           const { file, name } = args as {

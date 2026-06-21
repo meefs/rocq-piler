@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-06-21T09:28:58Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "indexed_ind",
+  "profile": "full",
+  "git_hash": "65a2dab",
+  "session_id": "ses_1167cf5b6ffeqCPIRhVnKvy4aI",
+  "duration_s": 874,
+  "tokens": {
+    "input": 132,
+    "output": 348,
+    "reasoning": 50476,
+    "cache_read": 201216,
+    "cache_write": 0
+  },
+  "cost": 0.045003708,
+  "steps": 5,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_indexed_ind_deepseek_deepseek-v4-pro_full_1782034138_HWMFtj/benchmarks/complete/indexed_ind.v",
+    "compiles": true,
+    "pairs_total": 2,
+    "pairs_resolved": 0,
+    "pairs": {
+      "progress": "neither",
+      "preservation": "neither"
+    }
+  }
+}

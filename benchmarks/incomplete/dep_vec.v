@@ -70,7 +70,10 @@ Inductive step : tm -> tm -> Prop :=
       value hd -> value tl ->
       step (ttail (tcons hd tl)) tl.
 
-(** ** Preservation *)
+(** ** Conjecture pairs
+    For each conjecture, both the statement and its negation are given.
+    Prove exactly one of each pair. *)
+
 Theorem preservation : forall t t' T,
   has_type t T ->
   step t t' ->
@@ -78,9 +81,22 @@ Theorem preservation : forall t t' T,
 Proof.
 Admitted.
 
+Theorem preservation_neg : ~ (forall t t' T,
+  has_type t T ->
+  step t t' ->
+  has_type t' T).
+Proof.
+Admitted.
+
 (** ** Progress *)
 Theorem progress : forall t T,
   has_type t T ->
   value t \/ exists t', step t t'.
+Proof.
+Admitted.
+
+Theorem progress_neg : ~ (forall t T,
+  has_type t T ->
+  value t \/ exists t', step t t').
 Proof.
 Admitted.

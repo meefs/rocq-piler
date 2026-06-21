@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-06-21T10:36:11Z",
+  "model": "anthropic/claude-sonnet-4-6",
+  "problem": "pcf_ref",
+  "profile": "full",
+  "git_hash": "65a2dab",
+  "session_id": "ses_1163f6f27ffekJXikXDsvacKrQ",
+  "duration_s": 2810,
+  "tokens": {
+    "input": 246,
+    "output": 102132,
+    "reasoning": 0,
+    "cache_read": 35200368,
+    "cache_write": 256055
+  },
+  "cost": 13.053034649999999,
+  "steps": 244,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_pcf_ref_anthropic_claude-sonnet-4-6_full_1782038171_M44lu4/benchmarks/complete/pcf_ref.v",
+    "compiles": true,
+    "pairs_total": 1,
+    "pairs_resolved": 1,
+    "pairs": {
+      "preservation": "proved"
+    }
+  }
+}

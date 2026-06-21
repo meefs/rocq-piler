@@ -1,17 +1,19 @@
-Require Import Coq.Lists.List.
-Require Import Coq.Init.Nat.
+From Stdlib Require Import Arith List Lia PeanoNat Permutation.
 Import ListNotations.
 
 (** * Merge Sort Correctness — Benchmark *)
-(* Definitions: merge, sorted, split, mergesort *)
 
-Fixpoint merge (l1 l2 : list nat) : list nat :=
-  match l1, l2 with
-  | [], l2 => l2
-  | l1, [] => l1
-  | x :: xs, y :: ys =>
-    if x <=? y then x :: merge xs (y :: ys)
-    else y :: merge (x :: xs) ys
+Fixpoint merge (l1 l2 : list nat) {struct l1} : list nat :=
+  match l1 with
+  | [] => l2
+  | x :: xs =>
+    (fix merge_inner (l2 : list nat) : list nat :=
+      match l2 with
+      | [] => x :: xs
+      | y :: ys =>
+        if x <=? y then x :: merge xs l2
+        else y :: merge_inner ys
+      end) l2
   end.
 
 Inductive sorted : list nat -> Prop :=
@@ -29,40 +31,39 @@ Fixpoint split (l : list nat) : list nat * list nat :=
     (x :: l1, y :: l2)
   end.
 
-Fixpoint mergesort (l : list nat) : list nat :=
-  match l with
-  | [] => []
-  | [x] => [x]
-  | _ :: _ :: _ =>
-    let (l1, l2) := split l in
-    merge (mergesort l1) (mergesort l2)
+Fixpoint mergesort (fuel : nat) (l : list nat) : list nat :=
+  match fuel with
+  | 0 => l
+  | S fuel' =>
+    match l with
+    | [] => []
+    | [x] => [x]
+    | _ :: _ :: _ =>
+      let (l1, l2) := split l in
+      merge (mergesort fuel' l1) (mergesort fuel' l2)
+    end
   end.
 
-Lemma sorted_cons_inv : forall x l,
-  sorted (x :: l) -> sorted l.
+(** ** Conjecture pairs
+    For each conjecture, both the statement and its negation are given.
+    Prove exactly one of each pair. *)
+
+Theorem mergesort_sorted : forall l,
+  sorted (mergesort (length l) l).
 Proof.
 Admitted.
 
-Lemma merge_sorted : forall l1 l2,
-  sorted l1 -> sorted l2 -> sorted (merge l1 l2).
+Theorem mergesort_sorted_neg : ~ (forall l,
+  sorted (mergesort (length l) l)).
 Proof.
 Admitted.
 
-Lemma split_length : forall l,
-  length (fst (split l)) + length (snd (split l)) = length l.
+Theorem mergesort_perm : forall l,
+  Permutation l (mergesort (length l) l).
 Proof.
 Admitted.
 
-Lemma split_shorter_l : forall l,
-  length (fst (split l)) < length l \/ length l <= 1.
-Proof.
-Admitted.
-
-Lemma split_shorter_r : forall l,
-  length (snd (split l)) < length l \/ length l <= 1.
-Proof.
-Admitted.
-
-Theorem mergesort_sorted : forall l, sorted (mergesort l).
+Theorem mergesort_perm_neg : ~ (forall l,
+  Permutation l (mergesort (length l) l)).
 Proof.
 Admitted.

@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-06-21T10:22:20Z",
+  "model": "anthropic/claude-sonnet-4-6",
+  "problem": "indexed_ind",
+  "profile": "rocq-mcp",
+  "git_hash": "65a2dab",
+  "session_id": "ses_1164c1abbffeVZxaazBQskWRvF",
+  "duration_s": 829,
+  "tokens": {
+    "input": 28,
+    "output": 53606,
+    "reasoning": 0,
+    "cache_read": 1490144,
+    "cache_write": 82785
+  },
+  "cost": 1.56166095,
+  "steps": 26,
+  "mcps": [
+    {
+      "name": "rocq-mcp",
+      "command": "/home/gavin/dev/Scidonia/rocq-mcp/.venv/bin/rocq-mcp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_indexed_ind_anthropic_claude-sonnet-4-6_rocq-mcp_1782037340_asOWbs/benchmarks/complete/indexed_ind.v",
+    "compiles": false,
+    "pairs_total": 2,
+    "pairs_resolved": 0,
+    "pairs": {
+      "progress": "neither",
+      "preservation": "neither"
+    }
+  }
+}

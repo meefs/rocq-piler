@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-06-21T17:01:42Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "mergesort",
+  "profile": "full",
+  "git_hash": "65a2dab",
+  "session_id": "ses_114de7825ffecxUPneC6E687yN",
+  "duration_s": 1874,
+  "tokens": {
+    "input": 86809,
+    "output": 37516,
+    "reasoning": 121052,
+    "cache_read": 26376832,
+    "cache_write": 0
+  },
+  "cost": 0.2713320910000002,
+  "steps": 187,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_mergesort_deepseek_deepseek-v4-pro_full_1782061302_cDxsVJ/benchmarks/complete/mergesort.v",
+    "compiles": true,
+    "pairs_total": 2,
+    "pairs_resolved": 2,
+    "pairs": {
+      "mergesort_perm": "proved",
+      "mergesort_sorted": "proved"
+    }
+  }
+}

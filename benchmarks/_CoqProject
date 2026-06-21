@@ -10,3 +10,5 @@ incomplete/snakelet_wp.v
 incomplete/dep_vec.v
 incomplete/mergesort.v
 incomplete/insertion_sort.v
+incomplete/indexed_ind.v
+complete/indexed_ind.v

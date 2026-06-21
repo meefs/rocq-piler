@@ -1,0 +1,12 @@
+{
+  "mcp": {
+    "rocq-piler": {
+      "type": "local",
+      "command": ["node", "ROCQ_PILER_DIST", "--coq-lsp-path", "COQ_LSP_PATH"],
+      "environment": {
+        "ROCQ_PILER_POSITIONAL_ONLY": "1"
+      },
+      "enabled": true
+    }
+  }
+}

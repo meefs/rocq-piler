@@ -14,10 +14,14 @@ result
 # Integration test temp fixtures
 test*/integration/fixtures/_tmp_*.v
 
+# Benchmark solutions (generated, not source)
+benchmarks/complete/
+
 # Coq/Rocq build artifacts
 *.glob
 *.vo
 *.vok
 *.vos
 .*.aux
-.lia.cache
+.lia.cache*.#*
+#*#

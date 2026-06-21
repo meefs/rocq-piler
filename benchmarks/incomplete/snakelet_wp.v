@@ -105,21 +105,15 @@ Definition sn_state : Type := gmap loc sn_val.
 
 Lemma fill_not_val K (x : sn_expr) : to_val x = None → to_val (fill_K K x) = None.
 Proof.
-  induction K as [|Ki K IH]; simpl; [auto|].
-  intros H. destruct Ki; simpl; reflexivity.
-Qed.
+Admitted.
 
 Lemma fill_K_val K (x : sn_expr) (v : sn_val) : fill_K K x = Val v ↔ K = [] ∧ x = Val v.
 Proof.
-  split.
-  - intros H. induction K as [|Ki K IH]; simpl in H.
-    + split; auto.
-    + destruct Ki; simpl in H; discriminate H.
-  - intros [-> ->]; reflexivity.
-Qed.
+Admitted.
 
 Lemma fill_item_inj Ki (a b : sn_expr) : fill_item Ki a = fill_item Ki b → a = b.
-Proof. destruct Ki; simpl; injection 1; auto. Qed.
+Proof.
+Admitted.
 
 (** * Substitution *)
 Fixpoint subst (x : string) (v : sn_val) (e : sn_expr) : sn_expr :=
@@ -355,11 +349,7 @@ Fixpoint subst_list (params : list string) (vs : list sn_val) (e : sn_expr) : sn
 Lemma map_Val_inj (vs1 vs2 : list sn_val) :
   map Val vs1 = map Val vs2 → vs1 = vs2.
 Proof.
-  revert vs2. induction vs1 as [|v1 vs1 IH]; intros [|v2 vs2] H;
-    simpl in H; try discriminate.
-  - reflexivity.
-  - injection H as Hv Hvs. f_equal; [exact Hv | apply IH, Hvs].
-Qed.
+Admitted.
 
 Section with_fun_ctx.
 Context `{FC : FunCtx}.
@@ -408,23 +398,18 @@ Inductive prim_step : sn_expr → sn_state → list observation → sn_expr → 
 
 Lemma snakelet_lang_mixin : LanguageMixin of_val to_val prim_step.
 Proof.
-  split.
-  - intros v. unfold of_val, to_val. reflexivity.
-  - intros e v Hto. unfold to_val in Hto. destruct e; try discriminate.
-    injection Hto as ->. unfold of_val. reflexivity.
-  - intros ex σ κ ex' σ' efs Hprim.
-    inversion Hprim as [K x0 σ0 x0' Hpure | K x0 σ0 x0' σ0' efs0 Hhead]; subst.
-    + apply (fill_not_val K x0). inversion Hpure; subst; simpl; auto.
-    + apply (fill_not_val K x0). destruct Hhead; subst; simpl; auto.
-Qed.
+Admitted.
 
 Canonical Structure snakelet_lang := Language snakelet_lang_mixin.
 
 Lemma to_val_pure_step x x' : pure_step x x' → to_val x = None.
-Proof. intros H; inversion H; simpl; auto. Qed.
+Proof.
+Admitted.
+
 
 Lemma to_val_head_step x σ x' σ' efs : head_step x σ x' σ' efs → to_val x = None.
-Proof. intros H; inversion H; simpl; auto. Qed.
+Proof.
+Admitted.
 
 Lemma fill_item_no_val_inj Ki1 Ki2 e1 e2 :
   to_val e1 = None → to_val e2 = None →

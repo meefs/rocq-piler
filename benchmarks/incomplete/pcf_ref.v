@@ -114,6 +114,10 @@ Inductive step : tm -> heap -> tm -> heap -> Prop :=
 
 Definition extends (S' S : store_ty) : Prop := exists S2, S' = S ++ S2.
 
+(** ** Conjecture pairs
+    For each conjecture, both the statement and its negation are given.
+    Prove exactly one of each pair. *)
+
 Theorem preservation :
   forall t mu t' mu' T S,
     has_type [] S t T ->
@@ -124,5 +128,18 @@ Theorem preservation :
       extends S' S /\
       heap_ok mu' S' /\
       has_type [] S' t' T.
+Proof.
+Admitted.
+
+Theorem preservation_neg : ~ (
+  forall t mu t' mu' T S,
+    has_type [] S t T ->
+    step t mu t' mu' ->
+    heap_ok mu S ->
+    length mu >= length S ->
+    exists S',
+      extends S' S /\
+      heap_ok mu' S' /\
+      has_type [] S' t' T).
 Proof.
 Admitted.

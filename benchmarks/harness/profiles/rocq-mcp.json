@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "rocq-mcp": {
+      "type": "local",
+      "command": ["ROCQ_MCP_BIN"],
+      "enabled": true
+    }
+  }
+}

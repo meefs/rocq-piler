@@ -187,7 +187,10 @@ Definition is_bisimulation (R : rel) : Prop :=
         (forall v1, eval t1 v1 -> exists v2, eval t2 v2 /\ v1 = v2) /\
         (forall v2, eval t2 v2 -> exists v1, eval t1 v1 /\ v1 = v2)
     | TArr A B =>
-        forall u, has_type [] u A -> R B (tApp t1 u) (tApp t2 u)
+        (forall v1, eval t1 v1 -> exists v2, eval t2 v2 /\
+          forall u, has_type [] u A -> R B (tApp v1 u) (tApp v2 u)) /\
+        (forall v2, eval t2 v2 -> exists v1, eval t1 v1 /\
+          forall u, has_type [] u A -> R B (tApp v1 u) (tApp v2 u))
     end.
 
 Definition bisimilar (T : ty) (t1 t2 : tm) : Prop :=
@@ -199,7 +202,8 @@ Definition bisimilar (T : ty) (t1 t2 : tm) : Prop :=
 
 Theorem bisim_sound : forall T t1 t2,
   bisimilar T t1 t2 -> ctx_equiv T t1 t2.
-Proof. Admitted.
+Proof.
+Admitted.
 
 Theorem bisim_sound_neg : ~ (forall T t1 t2,
   bisimilar T t1 t2 -> ctx_equiv T t1 t2).

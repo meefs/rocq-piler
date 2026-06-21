@@ -144,6 +144,14 @@ export function proofBounds(lines: string[], proofName: string): { proofLine: nu
   const proofLine = findProofLine(lines, proofName);
   if (proofLine < 0) return null;
 
+  const proofText = (lines[proofLine] || '').trim();
+  if (proofText.startsWith('Proof.') && proofText !== 'Proof.') {
+    const after = proofText.substring('Proof.'.length).trim();
+    if (after === 'Admitted.' || after === 'Qed.' || after === 'Defined.') {
+      return { proofLine, endLine: proofLine };
+    }
+  }
+
   let endLine = -1;
   for (let i = proofLine + 1; i < lines.length; i++) {
     const l = lines[i].trim();
@@ -172,6 +180,14 @@ export function admitSnapPosition(
   proofLine: number,
 ): { snapLine: number; snapChar: number } {
   const lineText = lines[admitLineIdx] || '';
+
+  if (admitLineIdx === proofLine) {
+    const proofDot = lineText.indexOf('Proof.');
+    if (proofDot >= 0) {
+      return { snapLine: admitLineIdx, snapChar: proofDot + 'Proof.'.length - 1 };
+    }
+  }
+
   const isRootAdmitted = lineText.trim() === 'Admitted.';
 
   if (isRootAdmitted) {
@@ -222,8 +238,11 @@ export function findAdmitLines(lines: string[], proofLine: number, endLine: numb
   // that left goals open without using admit.).
   // When tactic-level admits exist, they are the addressable goals; Admitted.
   // is just the terminator and must not appear as a spurious extra entry.
-  if (admitted.length === 0 && endLine >= 0 && lines[endLine]?.trim() === 'Admitted.') {
-    admitted.push(endLine);
+  if (admitted.length === 0 && endLine >= 0) {
+    const t = lines[endLine]?.trim() ?? '';
+    if (t === 'Admitted.' || (endLine === proofLine && t.startsWith('Proof.') && t.includes('Admitted.'))) {
+      admitted.push(endLine);
+    }
   }
   return admitted;
 }

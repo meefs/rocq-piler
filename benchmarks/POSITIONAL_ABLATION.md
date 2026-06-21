@@ -19,7 +19,7 @@ The server registers tools conditionally based on environment variables
 | Mode | Env | Tools exposed |
 |------|-----|---------------|
 | **Full** (treatment) | _(none)_ | 13 content-addressed tools: `focus_proof`, `insert_tactics`, `stratify`, `close_admits`, `add_lemma`, `delete_lemma`, `reset_proof`, `check_file`, `search_lemmas`, `inspect_term`, `inspect_about`, `locate_term`, `require_lib` |
-| **Full + edit_file** | `ROCQ_PILER_ENABLE_EDIT_FILE=1` | the 13 above **plus** `edit_file` |
+| **Full + edit_file** | *(default since v0.9.0)* | the 13 above **plus** `edit_file` (disable with `ROCQ_PILER_DISABLE_EDIT_FILE=1`) |
 | **Positional** (baseline) | `ROCQ_PILER_POSITIONAL_ONLY=1` | **only** `edit_file` + `check_file` |
 
 In positional-only mode the dispatcher also refuses any other tool if called

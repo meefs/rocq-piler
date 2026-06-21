@@ -1,4 +1,4 @@
-# SEFM 2026 Submission - rocq-robot Tool Paper
+# SEFM 2026 Submission - rocq-piler Tool Paper
 
 ## Submission Details
 
@@ -20,55 +20,54 @@ https://easychair.org/my/conference?conf=sefm2026
 
 ## Paper Details
 
-- **Title**: rocq-robot: Enabling LLM-Driven Theorem Proving via Model Context Protocol
+- **Title**: rocq-piler: A Content-Addressed Proof Oracle for LLM-Driven Discharge of Separation-Logic Obligations
 - **Author**: Gavin Mendel-Gleason (Scidonia, Dublin, Ireland)
-- **File**: `rocq-robot-sefm2026.tex`
+- **File**: `rocq-piler-sefm2026.tex` (replaces the old `rocq-robot-sefm2026.tex`)
 - **Format**: Springer LNCS (will need actual llncs.cls for final submission)
 - **Current length**: 7 pages (within 8-page limit)
 
 ## Paper Structure
 
 1. **Introduction** (1 page)
-   - Neurosymbolic programming motivation
-   - Key contributions (including cross-model validation)
-   - Tool availability
+   - Residual obligations of deductive verifiers as the problem
+   - Content-addressed obligations as the core idea
+   - Contributions + tool availability
 
-2. **Tool Architecture** (1.5 pages)
-   - System overview (MCP/LSP/Workspace layers)
-   - 4 tool categories
-   - Implementation details
+2. **Motivation: the Residual Obligations of a Deductive Verifier** (~0.75 page)
+   - axiomander emits Iris separation-logic obligations
+   - Automation discharges most; ~20% need an expert
+   - rocq-piler as the tunable oracle for that tail (prototype integration)
 
-3. **Usage Workflow** (1 page)
-   - Installation and setup
-   - Autonomous proof development workflow
+3. **The Content-Addressed Obligation Model** (~1 page)
+   - From positions to hashes (stability + coalescence)
+   - The core focus/insert loop
 
-4. **Case Study: Type Preservation Proof** (2 pages)
-   - Problem specification
-   - **Cross-model validation: Both DeepSeek v4 AND Claude Sonnet 4.5** (key result!)
-   - Proof statistics with comparison (~850 tool calls, 21 cases, 7 lemmas)
-   - Demonstrates robustness across different LLM architectures
+4. **Tool Architecture and Higher-Level Moves** (~1.5 pages)
+   - MCP/LSP-Pétanque/workspace layers
+   - Core obligation tools
+   - `stratify` + `close_admits` batch moves
+   - Speculative execution, knowledge search, incremental cache
 
-5. **Related Work** (0.5 pages)
-   - LLM theorem proving (Baldur, LeanDojo)
-   - Proof assistant interfaces (coq-lsp, CoqPIE, Proof General)
+5. **Case Study: Type Preservation for PCF + References** (~1.5 pages)
+   - Problem (typed store, store extension, de Bruijn substitution)
+   - Autonomous process (add_lemma → stratify → close survivors by hash)
+   - Results: 21 cases, 9 lemmas, ~50 calls, ~$0.04; two models
 
-6. **Lessons Learned and Future Directions** (0.5 pages)
-   - Design insights
-   - Future work
+6. **Related Work** (0.5 pages)
+   - Iris/separation logic; LLM proving (Baldur, LeanDojo); prover interfaces (coq-lsp, CoqPIE, Proof General)
 
-7. **Conclusion** (0.3 pages)
+7. **Status, Lessons, Future Work** (0.5 pages)
 
-8. **Bibliography** (6 references)
+8. **Conclusion** + **Bibliography** (7 references)
 
 ## Key Strengths for SEFM
 
-✅ **Perfect topic match**: "Software Engineering for AI models" and "Formal methods for AI safety"
-✅ **Production-ready tool**: Open-source, npm-published, actively maintained
-✅ **Cross-model validation**: BOTH DeepSeek v4 AND Claude Sonnet 4.5 independently completed the proof one-shot
-✅ **Concrete demonstration**: Real proof (type preservation for PCF+references, 21 cases, 7 lemmas)
-✅ **Robustness**: Works across different LLM architectures (open-source + proprietary)
-✅ **Neurosymbolic AI**: Combines LLMs + formal verification
-✅ **Industrial relevance**: Addresses SE + FM + AI integration
+✅ **Topic match**: deductive verification + formal methods + LLM automation
+✅ **Concrete problem**: automating the ~20% residual tail of an Iris-based verifier (axiomander)
+✅ **Novel abstraction**: content-addressed proof obligations + batch, speculative, non-regressing closing moves
+✅ **Reproducible case study**: type preservation for PCF+references (21 cases, 9 lemmas) closed by two LLMs for a few cents
+✅ **Open-source tool**: MIT, npm-published, actively developed
+✅ **Industrial relevance**: an oracle that plugs into a verifier's inner loop
 
 ## To-Do Before Submission
 
@@ -105,10 +104,10 @@ sudo apt-get install texlive-publishers
 
 ## Current Status
 
-- ✅ Paper drafted (7 pages including bibliography)
-- ✅ Compiled with article class (temporary)
+- ✅ Paper rewritten around content-addressed obligations + axiomander oracle framing (`rocq-piler-sefm2026.tex`)
+- ✅ Compiled with article class (temporary), 7 pages
 - ✅ Within page limit (7/8 pages)
-- ✅ Highlights cross-model validation (DeepSeek v4 + Claude Sonnet 4.5)
+- ✅ Case study updated to actual figures (21 cases, 9 lemmas, ~50 calls, ~$0.04)
 - ⬜ Needs LNCS class for final formatting
 - ⬜ Needs abstract submission
 - ⬜ Needs full paper submission
@@ -118,4 +117,7 @@ sudo apt-get install texlive-publishers
 - Current version uses `article` class as temporary substitute
 - Final submission MUST use `\documentclass[runningheads]{llncs}`
 - LNCS format may slightly change page count (typically ±0.5 pages)
-- Keep bibliography to ~6 references (current count)
+- Bibliography currently ~7 references (added Iris)
+- The old `rocq-robot-sefm2026.tex` is superseded by `rocq-piler-sefm2026.tex`
+- axiomander integration is described as an in-progress prototype; the PCF+Ref
+  proof is the reproducible stand-in for its residual obligations

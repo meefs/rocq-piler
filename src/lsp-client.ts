@@ -23,6 +23,12 @@ function dbg(msg: string) {
   appendFileSync(DBG, `[${new Date().toISOString()}] ${msg}\n`);
 }
 
+export interface LspDiagnostic {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  severity: number;
+  message: string;
+}
+
 export class RocqLspClient {
   private process: ChildProcessWithoutNullStreams | null = null;
   private connection: MessageConnection | null = null;
@@ -30,6 +36,7 @@ export class RocqLspClient {
   private restarting = false;
   private config: Required<ServerConfig>;
   private nextRequestId = 1;
+  private diagnosticsMap = new Map<string, LspDiagnostic[]>();
 
   constructor(config: ServerConfig) {
     this.config = {
@@ -93,6 +100,9 @@ export class RocqLspClient {
     });
 
     // Start listening
+    this.connection.onNotification('textDocument/publishDiagnostics', (params: any) => {
+      this.diagnosticsMap.set(params.uri, params.diagnostics ?? []);
+    });
     this.connection.listen();
     dbg('start() connection listening');
 
@@ -164,6 +174,7 @@ export class RocqLspClient {
   async stop(): Promise<void> {
     dbg('stop() begin  pid=' + (this.process?.pid ?? 0) + ' ready=' + this.ready + ' restarting=' + this.restarting);
     this.ready = false;
+    this.diagnosticsMap.clear();
     if (this.connection) {
       this.connection.dispose();
       this.connection = null;
@@ -245,6 +256,10 @@ export class RocqLspClient {
       }
     }
     dbg('waitUntilReady() OK  ready=true  pid=' + (this.process?.pid ?? 0));
+  }
+
+  getDiagnostics(uri: string): LspDiagnostic[] {
+    return this.diagnosticsMap.get(uri) ?? [];
   }
 
   /**

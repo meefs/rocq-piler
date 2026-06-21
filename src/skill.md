@@ -45,6 +45,16 @@ This document provides guidance for completing Coq/Rocq proofs using the `coq-ls
 |------|---------|
 | `edit_file` | Apply text edits to a file and re-sync with rocq-lsp. Use `find`/`replace` for simple text search-and-replace instead of computing line numbers. |
 
+## Critical Rules
+
+**Never use `edit`/`write` to modify proof bodies.** Between `Proof.` and `Qed.`/`Admitted.`, always use `focus_proof` → `insert_tactics`. Use `edit`/`write` only for lemma statements, definitions, and imports. This avoids blind editing loops where you guess hypothesis names, tactic syntax, or goal shapes — the proof tools show you the exact state before you commit.
+
+**After any `inversion`/`induction`, call `focus_proof` before writing tactics that reference hypotheses.** Coq generates unpredictable names like `H0`, `H3`, `H7` — guessing wastes round-trips.
+
+**For proofs with ≥3 cases, start with `stratify`.** It case-splits, auto-closes easy subgoals, and gives you hash-addressable admits for the hard ones.
+
+**Use `insert_tactics` with `tactics` (array) for multi-step sequences.** It validates each tactic incrementally and reports the exact failure point with full goal context if one fails.
+
 ## The Primary Proof Loop
 
 For multi-case induction proofs (5–25 subgoals), use this cycle:

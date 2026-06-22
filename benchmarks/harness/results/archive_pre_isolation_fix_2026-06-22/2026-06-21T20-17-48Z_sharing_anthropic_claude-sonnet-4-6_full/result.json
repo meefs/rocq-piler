@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-06-21T20:17:48Z",
+  "model": "anthropic/claude-sonnet-4-6",
+  "problem": "sharing",
+  "profile": "full",
+  "git_hash": "fbed301",
+  "session_id": "ses_1142af1d1ffeYzBlnJU75oKq5O",
+  "duration_s": 2426,
+  "tokens": {
+    "input": 164,
+    "output": 153783,
+    "reasoning": 0,
+    "cache_read": 28182122,
+    "cache_write": 265817
+  },
+  "cost": 11.758687350000006,
+  "steps": 162,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_sharing_anthropic_claude-sonnet-4-6_full_1782073068_c4jEOY/benchmarks/complete/sharing.v",
+    "compiles": false,
+    "pairs_total": 4,
+    "pairs_resolved": 1,
+    "pairs": {
+      "dag_subst_closed_correct": "neither",
+      "share_dup_lt": "proved",
+      "unfold_share": "neither",
+      "share_size_le": "neither"
+    }
+  }
+}

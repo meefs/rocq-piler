@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-06-21T19:33:01Z",
+  "model": "anthropic/claude-sonnet-4-6",
+  "problem": "pcf_bisim",
+  "profile": "rocq-mcp",
+  "git_hash": "fbed301",
+  "session_id": "ses_11453efe9ffeoF3I9SzcpKP27N",
+  "duration_s": 2684,
+  "tokens": {
+    "input": 133,
+    "output": 163018,
+    "reasoning": 0,
+    "cache_read": 15972664,
+    "cache_write": 230063
+  },
+  "cost": 8.100204450000001,
+  "steps": 131,
+  "mcps": [
+    {
+      "name": "rocq-mcp",
+      "command": "/home/gavin/dev/Scidonia/rocq-mcp/.venv/bin/rocq-mcp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_pcf_bisim_anthropic_claude-sonnet-4-6_rocq-mcp_1782070381_0VfP3c/benchmarks/complete/pcf_bisim.v",
+    "compiles": false,
+    "pairs_total": 2,
+    "pairs_resolved": 0,
+    "pairs": {
+      "bisim_sound": "neither",
+      "bisim_complete": "neither"
+    }
+  }
+}

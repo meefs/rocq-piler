@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-06-21T18:33:00Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "sharing",
+  "profile": "rocq-mcp",
+  "git_hash": "de4cde2",
+  "session_id": "ses_1148ae424ffe2OnhWvOyAgl4YL",
+  "duration_s": 3600,
+  "tokens": {
+    "input": 132168,
+    "output": 128173,
+    "reasoning": 88830,
+    "cache_read": 33509888,
+    "cache_write": 0
+  },
+  "cost": 0.36775903399999993,
+  "steps": 149,
+  "mcps": [
+    {
+      "name": "rocq-mcp",
+      "command": "/home/gavin/dev/Scidonia/rocq-mcp/.venv/bin/rocq-mcp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_sharing_deepseek_deepseek-v4-pro_rocq-mcp_1782066780_UtAOWo/benchmarks/complete/sharing.v",
+    "compiles": false,
+    "pairs_total": 4,
+    "pairs_resolved": 1,
+    "pairs": {
+      "dag_subst_closed_correct": "neither",
+      "share_dup_lt": "neither",
+      "unfold_share": "neither",
+      "share_size_le": "proved"
+    }
+  }
+}

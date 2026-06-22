@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-06-22T09:19:59Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "howe_core",
+  "profile": "full",
+  "git_hash": "086f24b",
+  "session_id": "ses_1115ed06effekniIR5wtef3PUS",
+  "duration_s": 3600,
+  "tokens": {
+    "input": 157936,
+    "output": 78763,
+    "reasoning": 170917,
+    "cache_read": 39759488,
+    "cache_write": 0
+  },
+  "cost": 0.430051904,
+  "steps": 195,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_howe_core_deepseek_deepseek-v4-pro_full_1782119999_qwcd4K/benchmarks/complete/howe_core.v",
+    "compiles": false,
+    "pairs_total": 8,
+    "pairs_resolved": 0,
+    "pairs": {
+      "bisim_congruence": "neither",
+      "bisim_sound": "unsound",
+      "howe_substitutive": "neither",
+      "howe_is_bisimulation": "neither",
+      "eval_ctx_equiv": "neither",
+      "bisim_complete": "unsound",
+      "howe_refl": "unsound",
+      "open_bisim_refl": "neither"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-06-21T19:13:41Z",
+  "model": "anthropic/claude-sonnet-4-6",
+  "problem": "mergesort",
+  "profile": "rocq-mcp",
+  "git_hash": "fbed301",
+  "session_id": "ses_11465a4bfffeMH7hmU4bgI1H7M",
+  "duration_s": 1019,
+  "tokens": {
+    "input": 89,
+    "output": 67354,
+    "reasoning": 0,
+    "cache_read": 8008379,
+    "cache_write": 150447
+  },
+  "cost": 3.97726695,
+  "steps": 87,
+  "mcps": [
+    {
+      "name": "rocq-mcp",
+      "command": "/home/gavin/dev/Scidonia/rocq-mcp/.venv/bin/rocq-mcp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_mergesort_anthropic_claude-sonnet-4-6_rocq-mcp_1782069221_TTFUpY/benchmarks/complete/mergesort.v",
+    "compiles": true,
+    "pairs_total": 2,
+    "pairs_resolved": 2,
+    "pairs": {
+      "mergesort_perm": "proved",
+      "mergesort_sorted": "proved"
+    }
+  }
+}

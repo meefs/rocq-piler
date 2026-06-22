@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-06-21T17:58:34Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "sharing",
+  "profile": "full",
+  "git_hash": "65a2dab",
+  "session_id": "ses_114aa6a2affecEvkM6uB8hxjGh",
+  "duration_s": 3600,
+  "tokens": {
+    "input": 60231,
+    "output": 19444,
+    "reasoning": 31119,
+    "cache_read": 2698112,
+    "cache_write": 0
+  },
+  "cost": 0.07997095100000001,
+  "steps": 37,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_sharing_deepseek_deepseek-v4-pro_full_1782064714_ehFJRo/benchmarks/complete/sharing.v",
+    "compiles": false,
+    "pairs_total": 4,
+    "pairs_resolved": 0,
+    "pairs": {
+      "dag_subst_closed_correct": "neither",
+      "share_dup_lt": "neither",
+      "unfold_share": "neither",
+      "share_size_le": "neither"
+    }
+  }
+}

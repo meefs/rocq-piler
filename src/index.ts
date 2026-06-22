@@ -2406,6 +2406,63 @@ async function main() {
               } catch {}
             }
 
+            // Check axiom dependencies for Qed items via Print Assumptions
+            const qedItems = items.filter(it => it.text.includes('[Qed]'));
+            const admittedItems = items.filter(it => it.text.includes('[Admitted]'));
+            if (qedItems.length > 0 && admittedItems.length > 0) {
+              // Extract Qed theorem names
+              const qedNames: Array<{ name: string; item: typeof items[0] }> = [];
+              for (const item of qedItems) {
+                const nameMatch = item.text.match(/(?:Lemma|Theorem|Corollary)\s+(\S+)/);
+                if (nameMatch) qedNames.push({ name: nameMatch[1], item });
+              }
+              if (qedNames.length > 0) {
+                // Speculatively append Print Assumptions commands
+                const originalText = doc.text;
+                const paLines = qedNames.map(q => `Print Assumptions ${q.name}.`);
+                const newText = originalText + '\n' + paLines.join('\n') + '\n';
+                const paStartLine = originalText.split('\n').length;
+                try {
+                  await docManager.updateDocument(file, newText);
+                  // Wait briefly for coq-lsp to process
+                  await sleep(500);
+                  // Read diagnostics at the Print Assumptions positions
+                  const diags = lspClient.getDiagnostics(doc.uri);
+                  for (let i = 0; i < qedNames.length; i++) {
+                    const targetLine = paStartLine + i;
+                    const relevantDiags = diags.filter(
+                      d => d.range.start.line >= targetLine && d.range.start.line <= targetLine
+                    );
+                    const output = relevantDiags.map(d => d.message).join(' ');
+                    if (output.includes('Closed under the global context')) {
+                      // Genuinely proved — keep [Qed]
+                    } else if (output.length > 0) {
+                      // Has axiom dependencies — extract names
+                      const axiomNames = output
+                        .split('\n')
+                        .filter(l => l.trim() && !l.includes('Axioms:'))
+                        .map(l => l.trim().split(/\s+/)[0])
+                        .filter(n => n && !n.includes('.'))  // internal (no dot = not stdlib)
+                        .slice(0, 5);
+                      if (axiomNames.length > 0) {
+                        qedNames[i].item.text = qedNames[i].item.text.replace(
+                          '[Qed]',
+                          `[Qed*] (depends on admitted: ${axiomNames.join(', ')})`
+                        );
+                      }
+                    }
+                  }
+                } catch (e) {
+                  // If speculative check fails, don't break check_file
+                } finally {
+                  // Restore original document
+                  try {
+                    await docManager.updateDocument(file, originalText);
+                  } catch {}
+                }
+              }
+            }
+
             // Paginate with boundary expansion
             const MAX_ITEMS = 40;
             let startIdx = 0;

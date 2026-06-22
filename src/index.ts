@@ -2416,18 +2416,22 @@ async function main() {
                 if (!nameMatch || !lineMatch) continue;
                 const name = nameMatch[1];
                 const endLine = parseInt(lineMatch[1], 10);
-                const paResult = await retryDocumentNotReady(() =>
-                  lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-                    textDocument: { uri: doc.uri, version: doc.version },
-                    position: { line: endLine, character: 0 },
-                    pp_format: 'Str',
-                    command: `Print Assumptions ${name}.`,
-                    mode: 'Prev',
+                // Get cached state at the line after Qed, then run Print Assumptions
+                const stateResult = await retryDocumentNotReady(() =>
+                  lspClient.sendRequest<any>('petanque/get_state_at_pos', {
+                    uri: doc.uri,
+                    position: { line: endLine + 1, character: 0 },
                   }, reqTimeout),
                   retryOpts
                 );
-                const msgs = (paResult as any).messages || [];
-                const msgText = msgs.map((m: any) => typeof m === 'string' ? m : m?.text || '').join('\n');
+                const stateId = stateResult?.st;
+                if (stateId == null) continue;
+                const paResult = await lspClient.sendRequest<any>('petanque/run', {
+                  st: stateId,
+                  tac: `Print Assumptions ${name}.`,
+                }, reqTimeout);
+                const feedback = (paResult?.feedback || []);
+                const msgText = feedback.map((f: any) => Array.isArray(f) ? f[1] : String(f)).join('\n');
                 if (msgText.includes('Closed under the global context')) {
                   // Genuinely proved — keep [Qed]
                 } else if (msgText.length > 0) {

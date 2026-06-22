@@ -2,6 +2,17 @@
 
 MCP server providing interactive Coq/Rocq proof development tools via coq-lsp.
 
+## Proof Development Workflow
+
+Use these MCP tools for Coq proofs — do NOT use `bash` + `coqc` directly:
+
+1. **`edit_file`** — write or modify `.v` files
+2. **`check_file`** — verify the file and see ALL errors with diagnostic messages and goal states in one call
+3. Fix all reported errors in the next `edit_file` call
+4. Repeat until all proofs are `Qed`
+
+This workflow is much faster than running `coqc` via bash. `check_file` reports errors across the entire file at once, with the exact error message and line number for each failure.
+
 ## Build & Test
 
 ```bash

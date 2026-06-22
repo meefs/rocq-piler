@@ -2406,60 +2406,43 @@ async function main() {
               } catch {}
             }
 
-            // Check axiom dependencies for Qed items via Print Assumptions
+            // Check axiom dependencies for Qed items via proof/goals + command
             const qedItems = items.filter(it => it.text.includes('[Qed]'));
-            const admittedItems = items.filter(it => it.text.includes('[Admitted]'));
+            const admittedItems = items.filter(it => it.text.includes('[Admitted]') || it.text.includes('[FAILED]'));
             if (qedItems.length > 0 && admittedItems.length > 0) {
-              // Extract Qed theorem names
-              const qedNames: Array<{ name: string; item: typeof items[0] }> = [];
               for (const item of qedItems) {
                 const nameMatch = item.text.match(/(?:Lemma|Theorem|Corollary)\s+(\S+)/);
-                if (nameMatch) qedNames.push({ name: nameMatch[1], item });
-              }
-              if (qedNames.length > 0) {
-                // Speculatively append Print Assumptions commands
-                const originalText = doc.text;
-                const paLines = qedNames.map(q => `Print Assumptions ${q.name}.`);
-                const newText = originalText + '\n' + paLines.join('\n') + '\n';
-                const paStartLine = originalText.split('\n').length;
+                const lineMatch = item.text.match(/\[L\d+-L(\d+)\]/);
+                if (!nameMatch || !lineMatch) continue;
+                const name = nameMatch[1];
+                const endLine = parseInt(lineMatch[1], 10);
                 try {
-                  await docManager.updateDocument(file, newText);
-                  // Wait briefly for coq-lsp to process
-                  await sleep(500);
-                  // Read diagnostics at the Print Assumptions positions
-                  const diags = lspClient.getDiagnostics(doc.uri);
-                  for (let i = 0; i < qedNames.length; i++) {
-                    const targetLine = paStartLine + i;
-                    const relevantDiags = diags.filter(
-                      d => d.range.start.line >= targetLine && d.range.start.line <= targetLine
-                    );
-                    const output = relevantDiags.map(d => d.message).join(' ');
-                    if (output.includes('Closed under the global context')) {
-                      // Genuinely proved — keep [Qed]
-                    } else if (output.length > 0) {
-                      // Has axiom dependencies — extract names
-                      const axiomNames = output
-                        .split('\n')
-                        .filter(l => l.trim() && !l.includes('Axioms:'))
-                        .map(l => l.trim().split(/\s+/)[0])
-                        .filter(n => n && !n.includes('.'))  // internal (no dot = not stdlib)
-                        .slice(0, 5);
-                      if (axiomNames.length > 0) {
-                        qedNames[i].item.text = qedNames[i].item.text.replace(
-                          '[Qed]',
-                          `[Qed*] (depends on admitted: ${axiomNames.join(', ')})`
-                        );
-                      }
+                  const paResult = await retryDocumentNotReady(() =>
+                    lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                      textDocument: { uri: doc.uri, version: doc.version },
+                      position: { line: endLine, character: 0 },
+                      pp_format: 'Str',
+                      command: `Print Assumptions ${name}.`,
+                      mode: 'Prev',
+                    }, reqTimeout),
+                    retryOpts
+                  );
+                  const msgs = (paResult as any).messages || [];
+                  const msgText = msgs.map((m: any) => typeof m === 'string' ? m : m?.text || '').join('\n');
+                  if (msgText.includes('Closed under the global context')) {
+                    // Genuinely proved — keep [Qed]
+                  } else if (msgText.length > 0) {
+                    const axiomNames = msgText.split('\n')
+                      .filter((l: string) => l.trim() && !l.includes('Axioms:') && !l.includes('Closed'))
+                      .map((l: string) => l.trim().split(/\s*:/)[0])
+                      .filter((n: string) => n && !n.includes('.'))
+                      .slice(0, 5);
+                    if (axiomNames.length > 0) {
+                      item.text = item.text.replace('[Qed]',
+                        `[Qed*] (depends on admitted: ${axiomNames.join(', ')})`);
                     }
                   }
-                } catch (e) {
-                  // If speculative check fails, don't break check_file
-                } finally {
-                  // Restore original document
-                  try {
-                    await docManager.updateDocument(file, originalText);
-                  } catch {}
-                }
+                } catch {}
               }
             }
 

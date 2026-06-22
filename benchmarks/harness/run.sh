@@ -107,19 +107,19 @@ git -C "$WORKDIR" init --quiet 2>/dev/null
 git -C "$WORKDIR" add -A && git -C "$WORKDIR" commit --quiet -m "init" 2>/dev/null || true
 
 # Write MCP profile as project-local opencode config
-# Write MCP profile to a temp config and force it as the ONLY config
-# (project-local opencode.json merges with global and doesn't isolate MCPs)
-PROFILE_CONFIG=$(mktemp "$WORKDIR/opencode_profile_XXXXXX.json")
-echo "$RESOLVED_CONFIG" > "$PROFILE_CONFIG"
+# Write MCP profile as project-local opencode config
+# Note: opencode merges project + global configs. We can't fully isolate MCPs
+# via config alone. The evaluator verifies actual tool usage from transcripts.
+echo "$RESOLVED_CONFIG" > "$WORKDIR/opencode.json"
 
-# Extract MCP list from the resolved profile
+# Extract MCP list from the resolved profile (what we WANT to be available)
 MCP_LIST=$(echo "$RESOLVED_CONFIG" | jq -c '[(.mcpServers // .mcp // {}) | to_entries[] | select(.value.enabled != false) | {name: .key, command: (.value.command // [] | join(" ")), enabled: (.value.enabled // true)}]' 2>/dev/null || echo "[]")
 
-# Run opencode with OPENCODE_CONFIG to override global MCP config
+# Run opencode
 echo "[$RUN_ID] Running model=$MODEL problem=$PROBLEM profile=$PROFILE timeout=${TIMEOUT}s ..." >&2
 START_TIME=$(date +%s)
 
-OPENCODE_CONFIG="$PROFILE_CONFIG" timeout "$TIMEOUT" opencode run \
+timeout "$TIMEOUT" opencode run \
   --model "$MODEL" \
   --format json \
   --dangerously-skip-permissions \
@@ -150,6 +150,10 @@ TOTAL_COST=$(jq -s '[.[] | select(.type=="step_finish") | .part.cost // 0] | add
 SESSION_ID=$(jq -rs '[.[] | .sessionID // empty][0] // "unknown"' "$JSON_LOG")
 STEP_COUNT=$(jq -s '[.[] | select(.type=="step_finish")] | length' "$JSON_LOG")
 
+# Extract ACTUAL tool usage from transcript (not just configured MCPs)
+TOOLS_USED=$(jq -r 'select(.type=="tool_use") | .part.tool // "?"' "$JSON_LOG" | sort | uniq -c | sort -rn | awk '{printf "{\"tool\":\"%s\",\"count\":%s},",$2,$1}' | sed 's/,$//' | awk '{print "["$0"]"}')
+[[ -z "$TOOLS_USED" || "$TOOLS_USED" == "[]" ]] && TOOLS_USED="[]"
+
 # Evaluate the result
 INCOMPLETE_REF="$WORKDIR/benchmarks/incomplete/${PROBLEM}.v"
 if [[ -f "$COMPLETE_FILE" ]]; then
@@ -177,6 +181,7 @@ RECORD=$(jq -n \
   --argjson steps "$STEP_COUNT" \
   --argjson eval "$EVAL_RESULT" \
   --argjson mcps "$MCP_LIST" \
+  --argjson tools_used "$TOOLS_USED" \
   '{
     timestamp: $timestamp,
     model: $model,
@@ -195,6 +200,7 @@ RECORD=$(jq -n \
     cost: $cost,
     steps: $steps,
     mcps: $mcps,
+    tools_used: $tools_used,
     eval: $eval
   }')
 

@@ -14,6 +14,18 @@ Use these MCP tools for Coq proofs — do NOT use `bash` + `coqc` directly:
 
 This workflow is much faster than running `coqc` via bash. `check_file` reports errors across the entire file at once, with the exact error message and line number for each failure.
 
+### Workflow Example
+
+```
+search_lemmas "(_ + 0 = _)"           # Step 1: explore what's available
+edit_file                              # Step 2: write complete proof
+check_file                             # Step 3: see all errors + goals at once
+edit_file                              # Step 4: fix all errors in one edit
+check_file                             # Step 5: verify — done
+```
+
+Do NOT insert tactics one at a time. Write the complete proof body, then check.
+
 ## Build & Test
 
 ```bash

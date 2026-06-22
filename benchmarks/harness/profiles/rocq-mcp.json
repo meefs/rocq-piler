@@ -4,6 +4,13 @@
       "type": "local",
       "command": ["ROCQ_MCP_BIN"],
       "enabled": true
-    }
+    },
+    "rocq-piler": { "enabled": false },
+    "morph-mcp": { "enabled": false },
+    "github": { "enabled": false },
+    "google-workspace": { "enabled": false },
+    "brevo": { "enabled": false },
+    "fal-ai-image": { "enabled": false },
+    "axiomander": { "enabled": false }
   }
 }

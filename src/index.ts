@@ -2230,7 +2230,7 @@ async function main() {
 
           try {
             const doc = await ensureDocumentOpened(file);
-            const reqTimeout = timeout_ms ?? 120000;
+            const reqTimeout = timeout_ms ?? 300000;
             const retryOpts = retry_timeout_ms !== undefined ? { timeoutMs: retry_timeout_ms } : undefined;
 
             const result = await retryDocumentNotReady(() =>

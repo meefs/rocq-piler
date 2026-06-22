@@ -2285,8 +2285,10 @@ async function main() {
 
             // Summary: scan file for toplevel names, status, and line ranges
             const errorLines = new Set<number>();
+            const errorDetails: Array<{ line: number; message: string }> = [];
             for (const d of lspClient.getDiagnostics(doc.uri)) {
               if (d.severity === 1) {
+                errorDetails.push({ line: d.range.start.line, message: d.message });
                 for (let ln = d.range.start.line; ln <= d.range.end.line; ln++) {
                   errorLines.add(ln);
                 }
@@ -2364,6 +2366,14 @@ async function main() {
                   if (typeStr.length > 120) typeStr = typeStr.slice(0, 117) + '...';
                   entry = `${kw} ${namePart} : ${typeStr || '?'} [${rangeStr}] [${status}]`;
                 }
+                if (status === 'FAILED') {
+                  const itemErrors = errorDetails.filter(e => e.line >= i && e.line <= endLine);
+                  for (const e of itemErrors.slice(0, 3)) {
+                    const msg = e.message.length > 200 ? e.message.slice(0, 197) + '...' : e.message;
+                    entry += `\n  ERROR L${e.line + 1}: ${msg}`;
+                  }
+                  if (itemErrors.length > 3) entry += `\n  ... and ${itemErrors.length - 3} more error(s)`;
+                }
                 items.push({ text: entry, startLine: i });
                 i = endLine;
               }
@@ -2384,6 +2394,12 @@ async function main() {
             const pageItems = items.slice(startIdx, endIdx);
             const truncated = paginated ? endIdx < items.length : items.length > MAX_ITEMS;
 
+            const MAX_OUTPUT_CHARS = 10000;
+            let summaryText = pageItems.map(it => it.text).join('\n');
+            if (summaryText.length > MAX_OUTPUT_CHARS) {
+              summaryText = summaryText.slice(0, MAX_OUTPUT_CHARS) + '\n... OUTPUT TRUNCATED (more errors not shown)';
+            }
+
             const summary = pageItems.length > 0
               ? (paginated
                   ? `\n[${startIdx}-${endIdx-1}/${items.length}]` +
@@ -2391,7 +2407,7 @@ async function main() {
                   : (items.length > MAX_ITEMS
                       ? `\n[0-${pageItems.length-1}/${items.length}] (truncated at ${MAX_ITEMS} items)`
                       : ''))
-                + '\n' + pageItems.map(it => it.text).join('\n')
+                + '\n' + summaryText
               : (items.length > 0 ? `\n${items.length} items total (use count parameter to paginate)` : '');
 
             return reply(

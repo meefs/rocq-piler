@@ -972,12 +972,52 @@ async function main() {
       switch (name) {
 
         case 'edit_file': {
-          const { file, edits, find, replace } = args as {
-            file: string;
-            edits?: Array<{ range: Range; newText: string }>;
+          const a = args as {
+            file?: string;
+            filePath?: string;
+            path?: string;
+            edits?: Array<{ range?: Range; newText?: string }>;
             find?: string;
             replace?: string;
           };
+          // Accept common aliases the model emits instead of `file`.
+          const file = a.file ?? a.filePath ?? a.path;
+          const { edits, find, replace } = a;
+
+          if (typeof file !== 'string' || file.length === 0) {
+            return reply(
+              'edit_file: missing required "file" argument (string path to a .v file). ' +
+              'Note: the parameter is named "file", not "filePath" or "path".',
+              { error: 'missing_file' }
+            );
+          }
+
+          // Validate edit shape early so we return a helpful message instead of
+          // crashing on a missing range/newText.
+          if (find === undefined && Array.isArray(edits)) {
+            for (let i = 0; i < edits.length; i++) {
+              const e = edits[i];
+              if (!e || typeof e !== 'object' || !e.range || e.range.start === undefined || e.range.end === undefined) {
+                return reply(
+                  `edit_file: edits[${i}] is missing a "range" {start,end}. ` +
+                  'For text-based replacement, use the "find"/"replace" parameters instead of "edits".',
+                  { error: 'invalid_edit', index: i }
+                );
+              }
+              if (typeof e.newText !== 'string') {
+                return reply(
+                  `edit_file: edits[${i}] is missing a string "newText".`,
+                  { error: 'invalid_edit', index: i }
+                );
+              }
+            }
+          }
+          if (find === undefined && (!edits || edits.length === 0)) {
+            return reply(
+              'edit_file: provide either "find"/"replace" for text replacement, or a non-empty "edits" array.',
+              { error: 'no_edits' }
+            );
+          }
 
           // Get current document
           let doc = docManager.getDocument(file);
@@ -1009,7 +1049,8 @@ async function main() {
               newText: replace ?? '',
             }];
           } else {
-            resolvedEdits = edits || [];
+            // Validated above to have range+newText.
+            resolvedEdits = (edits || []) as Array<{ range: Range; newText: string }>;
           }
 
           // Apply edits

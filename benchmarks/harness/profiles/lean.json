@@ -1,0 +1,31 @@
+{
+  "mcp": {
+    "rocq-piler": {
+      "type": "local",
+      "command": ["node", "ROCQ_PILER_DIST", "--coq-lsp-path", "COQ_LSP_PATH"],
+      "enabled": true
+    }
+  },
+  "tools": {
+    "rocq-piler_focus_proof": false,
+    "rocq-piler_insert_tactics": false,
+    "rocq-piler_stratify": false,
+    "rocq-piler_close_admits": false,
+    "rocq-piler_reset_proof": false,
+    "rocq-piler_add_lemma": false,
+    "rocq-piler_add_block": false,
+    "rocq-piler_delete_lemma": false,
+    "rocq-piler_move_lemma": false,
+    "rocq-piler_inspect_term": false,
+    "rocq-piler_inspect_about": false,
+    "rocq-piler_require_lib": false,
+    "rocq-piler_locate_term": false,
+    "rocq-mcp_*": false,
+    "morph-mcp_*": false,
+    "github_*": false,
+    "google-workspace_*": false,
+    "brevo_*": false,
+    "fal-ai-image_*": false,
+    "axiomander_*": false
+  }
+}

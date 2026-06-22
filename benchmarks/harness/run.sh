@@ -107,16 +107,19 @@ git -C "$WORKDIR" init --quiet 2>/dev/null
 git -C "$WORKDIR" add -A && git -C "$WORKDIR" commit --quiet -m "init" 2>/dev/null || true
 
 # Write MCP profile as project-local opencode config
-echo "$RESOLVED_CONFIG" > "$WORKDIR/opencode.json"
+# Write MCP profile to a temp config and force it as the ONLY config
+# (project-local opencode.json merges with global and doesn't isolate MCPs)
+PROFILE_CONFIG=$(mktemp "$WORKDIR/opencode_profile_XXXXXX.json")
+echo "$RESOLVED_CONFIG" > "$PROFILE_CONFIG"
 
 # Extract MCP list from the resolved profile
-MCP_LIST=$(echo "$RESOLVED_CONFIG" | jq -c '[(.mcpServers // .mcp // {}) | to_entries[] | {name: .key, command: (.value.command // [] | join(" ")), enabled: (.value.enabled // true)}]' 2>/dev/null || echo "[]")
+MCP_LIST=$(echo "$RESOLVED_CONFIG" | jq -c '[(.mcpServers // .mcp // {}) | to_entries[] | select(.value.enabled != false) | {name: .key, command: (.value.command // [] | join(" ")), enabled: (.value.enabled // true)}]' 2>/dev/null || echo "[]")
 
-# Run opencode
+# Run opencode with OPENCODE_CONFIG to override global MCP config
 echo "[$RUN_ID] Running model=$MODEL problem=$PROBLEM profile=$PROFILE timeout=${TIMEOUT}s ..." >&2
 START_TIME=$(date +%s)
 
-timeout "$TIMEOUT" opencode run \
+OPENCODE_CONFIG="$PROFILE_CONFIG" timeout "$TIMEOUT" opencode run \
   --model "$MODEL" \
   --format json \
   --dangerously-skip-permissions \

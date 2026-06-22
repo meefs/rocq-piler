@@ -1,12 +1,12 @@
 {
-  "mcp": {
-    "rocq-piler": { "enabled": false },
-    "rocq-mcp": { "enabled": false },
-    "morph-mcp": { "enabled": false },
-    "github": { "enabled": false },
-    "google-workspace": { "enabled": false },
-    "brevo": { "enabled": false },
-    "fal-ai-image": { "enabled": false },
-    "axiomander": { "enabled": false }
+  "tools": {
+    "rocq-piler_*": false,
+    "rocq-mcp_*": false,
+    "morph-mcp_*": false,
+    "github_*": false,
+    "google-workspace_*": false,
+    "brevo_*": false,
+    "fal-ai-image_*": false,
+    "axiomander_*": false
   }
 }

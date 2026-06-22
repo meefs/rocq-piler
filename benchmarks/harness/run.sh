@@ -107,12 +107,12 @@ git -C "$WORKDIR" init --quiet 2>/dev/null
 git -C "$WORKDIR" add -A && git -C "$WORKDIR" commit --quiet -m "init" 2>/dev/null || true
 
 # Write MCP profile as project-local opencode config
-# Write MCP profile as project-local opencode config
-# Note: opencode merges project + global configs. We can't fully isolate MCPs
-# via config alone. The evaluator verifies actual tool usage from transcripts.
+# Write profile as project-local opencode.json
+# The "tools" section with glob patterns hides unwanted MCP tools from the LLM
+# (see https://opencode.ai/docs/mcp-servers/#manage)
 echo "$RESOLVED_CONFIG" > "$WORKDIR/opencode.json"
 
-# Extract MCP list from the resolved profile (what we WANT to be available)
+# Extract MCP list from the resolved profile
 MCP_LIST=$(echo "$RESOLVED_CONFIG" | jq -c '[(.mcpServers // .mcp // {}) | to_entries[] | select(.value.enabled != false) | {name: .key, command: (.value.command // [] | join(" ")), enabled: (.value.enabled // true)}]' 2>/dev/null || echo "[]")
 
 # Run opencode

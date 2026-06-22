@@ -601,7 +601,7 @@ async function main() {
               file: { type: 'string' },
               start_line: { type: 'number', description: 'Optional: 0-based start line for paginated summary' },
               count: { type: 'number', description: 'Optional: max items to return (boundary-expanding)' },
-              timeout_ms: { type: 'number', description: 'Optional: per-request timeout in ms (default 15000)' },
+              timeout_ms: { type: 'number', description: 'Optional: per-request timeout in ms (default 120000). Increase for large files.' },
               retry_timeout_ms: { type: 'number', description: 'Optional: total retry timeout in ms for cold starts (default 300000)' },
               auto_admit: { type: 'boolean', default: true, description: 'Auto-admit failed proofs with hash-addressable admits so the file compiles and failures are targetable by insert_tactics admit_hash=<hash>. Default: true.' },
             },
@@ -2230,7 +2230,7 @@ async function main() {
 
           try {
             const doc = await ensureDocumentOpened(file);
-            const reqTimeout = timeout_ms ?? 15000;
+            const reqTimeout = timeout_ms ?? 120000;
             const retryOpts = retry_timeout_ms !== undefined ? { timeoutMs: retry_timeout_ms } : undefined;
 
             const result = await retryDocumentNotReady(() =>

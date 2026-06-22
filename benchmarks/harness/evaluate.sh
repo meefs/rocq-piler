@@ -4,6 +4,7 @@ set -euo pipefail
 # evaluate.sh — Check a completed .v file against its incomplete reference
 # Usage: evaluate.sh <complete_file> --reference <incomplete_file> [-- coq_flags...]
 # Output: JSON object with results to stdout
+# Checks: compilation, conjecture pairs, AND axiom soundness (Print Assumptions)
 
 COMPLETE=""
 INCOMPLETE=""
@@ -65,7 +66,70 @@ while IFS=' ' read -r name status; do
   COMPLETE_STATUS["$name"]="$status"
 done <<< "$(extract_statuses "$COMPLETE")"
 
-# 4. Evaluate pairs
+# 4. Check axiom soundness for Qed theorems using Print Assumptions
+declare -A AXIOM_STATUS  # name -> "sound" or "unsound:axiom1,axiom2,..."
+if [[ "$COMPILES" == "true" ]]; then
+  QED_NAMES=()
+  for name in "${!COMPLETE_STATUS[@]}"; do
+    [[ "${COMPLETE_STATUS[$name]}" == "qed" ]] && QED_NAMES+=("$name")
+  done
+
+  if [[ ${#QED_NAMES[@]} -gt 0 ]]; then
+    CHECK_FILE=$(mktemp /tmp/eval_check_XXXXXX.v)
+    trap "rm -f $CHECK_FILE" EXIT
+
+    # Copy the complete file and append Print Assumptions for each Qed theorem
+    cp "$COMPLETE" "$CHECK_FILE"
+    for name in "${QED_NAMES[@]}"; do
+      echo "Print Assumptions ${name}." >> "$CHECK_FILE"
+    done
+
+    # Run coqc and capture assumptions output
+    ASSUMPTIONS_OUTPUT=$(coqc "${COQ_FLAGS[@]}" "$CHECK_FILE" 2>&1 || true)
+
+    # Parse: for each theorem, check if "Closed under the global context" or has axioms
+    current_theorem=""
+    idx=0
+    while IFS= read -r line; do
+      if echo "$line" | grep -q "Closed under the global context"; then
+        if [[ $idx -lt ${#QED_NAMES[@]} ]]; then
+          AXIOM_STATUS["${QED_NAMES[$idx]}"]="sound"
+          idx=$((idx + 1))
+        fi
+      elif echo "$line" | grep -q "^Axioms:"; then
+        # Collect axiom names until next blank line or Print Assumptions
+        axioms=""
+        while IFS= read -r aline; do
+          [[ -z "$aline" ]] && break
+          echo "$aline" | grep -q "^Axioms:" && break
+          echo "$aline" | grep -q "Closed under" && break
+          # Extract axiom name (first word before :)
+          aname=$(echo "$aline" | sed 's/^\s*//' | cut -d' ' -f1 | tr -d ':')
+          [[ -n "$aname" ]] && axioms="${axioms:+$axioms,}$aname"
+        done
+        if [[ $idx -lt ${#QED_NAMES[@]} ]]; then
+          # Check if axioms are all from standard library
+          has_internal=false
+          for ax in $(echo "$axioms" | tr ',' ' '); do
+            # Standard axioms contain dots (Stdlib.Logic.Classical_Prop.classic etc)
+            if ! echo "$ax" | grep -q '\.'; then
+              # No dot = likely an internal admitted lemma
+              has_internal=true
+            fi
+          done
+          if [[ "$has_internal" == "true" ]]; then
+            AXIOM_STATUS["${QED_NAMES[$idx]}"]="unsound:$axioms"
+          else
+            AXIOM_STATUS["${QED_NAMES[$idx]}"]="sound"
+          fi
+          idx=$((idx + 1))
+        fi
+      fi
+    done <<< "$ASSUMPTIONS_OUTPUT"
+  fi
+fi
+
+# 5. Evaluate pairs (now considering axiom soundness)
 PAIRS_JSON="{"
 PAIRS_TOTAL=0
 PAIRS_RESOLVED=0
@@ -76,13 +140,23 @@ if [[ ${#REF_PAIRS[@]} -gt 0 ]]; then
     PAIRS_TOTAL=$((PAIRS_TOTAL + 1))
     pos="${COMPLETE_STATUS[$base]:-missing}"
     neg="${COMPLETE_STATUS[${base}_neg]:-missing}"
+    pos_sound="${AXIOM_STATUS[$base]:-unknown}"
+    neg_sound="${AXIOM_STATUS[${base}_neg]:-unknown}"
 
-    if [[ "$pos" == "qed" ]]; then
+    # A theorem only counts as proved if Qed AND axiom-sound
+    pos_valid=$([[ "$pos" == "qed" && "$pos_sound" == "sound" ]] && echo true || echo false)
+    neg_valid=$([[ "$neg" == "qed" && "$neg_sound" == "sound" ]] && echo true || echo false)
+
+    if [[ "$pos_valid" == "true" ]]; then
       pair_result="proved"
       PAIRS_RESOLVED=$((PAIRS_RESOLVED + 1))
-    elif [[ "$neg" == "qed" ]]; then
+    elif [[ "$neg_valid" == "true" ]]; then
       pair_result="refuted"
       PAIRS_RESOLVED=$((PAIRS_RESOLVED + 1))
+    elif [[ "$pos" == "qed" && "$pos_sound" != "sound" ]]; then
+      pair_result="unsound"
+    elif [[ "$neg" == "qed" && "$neg_sound" != "sound" ]]; then
+      pair_result="unsound"
     else
       pair_result="neither"
     fi
@@ -91,10 +165,12 @@ if [[ ${#REF_PAIRS[@]} -gt 0 ]]; then
     SEPARATOR=","
   done
 else
-  # Fallback: no reference or no pairs found — count all qed theorems
   for name in "${!COMPLETE_STATUS[@]}"; do
     PAIRS_TOTAL=$((PAIRS_TOTAL + 1))
-    [[ "${COMPLETE_STATUS[$name]}" == "qed" ]] && PAIRS_RESOLVED=$((PAIRS_RESOLVED + 1))
+    if [[ "${COMPLETE_STATUS[$name]}" == "qed" ]]; then
+      sound="${AXIOM_STATUS[$name]:-unknown}"
+      [[ "$sound" == "sound" ]] && PAIRS_RESOLVED=$((PAIRS_RESOLVED + 1))
+    fi
   done
 fi
 PAIRS_JSON="${PAIRS_JSON}}"

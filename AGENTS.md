@@ -28,6 +28,8 @@ Do NOT insert tactics one at a time. Write the complete proof body, then check.
 
 When a proof is hard, **add helper lemmas** before the main theorem using `edit_file`. Break complex goals into smaller lemmas — this is how real Coq proofs work. Write the helpers with their proofs, then use them in the main proof.
 
+Do NOT try to solve everything in one step. Work incrementally — prove one theorem at a time, checking after each one.
+
 ## Build & Test
 
 ```bash

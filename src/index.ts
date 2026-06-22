@@ -454,7 +454,8 @@ async function main() {
         {
           name: 'search_lemmas',
           description:
-            'Search the Coq environment for lemmas and theorems. Simple names auto-quote (e.g. "plus_n_O"). ' +
+            'Search the Coq environment for lemmas and theorems. Use this to explore before writing proofs — find relevant lemmas first. ' +
+            'Simple names auto-quote (e.g. "plus_n_O"). ' +
             'Use parentheses for patterns: "(_ + 0 = _)" or just "_ + 0 = _". ' +
             'Runs speculatively, no file changes.',
           inputSchema: {

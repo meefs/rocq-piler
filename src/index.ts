@@ -2416,33 +2416,31 @@ async function main() {
                 if (!nameMatch || !lineMatch) continue;
                 const name = nameMatch[1];
                 const endLine = parseInt(lineMatch[1], 10);
-                try {
-                  const paResult = await retryDocumentNotReady(() =>
-                    lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-                      textDocument: { uri: doc.uri, version: doc.version },
-                      position: { line: endLine, character: 0 },
-                      pp_format: 'Str',
-                      command: `Print Assumptions ${name}.`,
-                      mode: 'Prev',
-                    }, reqTimeout),
-                    retryOpts
-                  );
-                  const msgs = (paResult as any).messages || [];
-                  const msgText = msgs.map((m: any) => typeof m === 'string' ? m : m?.text || '').join('\n');
-                  if (msgText.includes('Closed under the global context')) {
-                    // Genuinely proved — keep [Qed]
-                  } else if (msgText.length > 0) {
-                    const axiomNames = msgText.split('\n')
-                      .filter((l: string) => l.trim() && !l.includes('Axioms:') && !l.includes('Closed'))
-                      .map((l: string) => l.trim().split(/\s*:/)[0])
-                      .filter((n: string) => n && !n.includes('.'))
-                      .slice(0, 5);
-                    if (axiomNames.length > 0) {
-                      item.text = item.text.replace('[Qed]',
-                        `[Qed*] (depends on admitted: ${axiomNames.join(', ')})`);
-                    }
+                const paResult = await retryDocumentNotReady(() =>
+                  lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                    textDocument: { uri: doc.uri, version: doc.version },
+                    position: { line: endLine, character: 0 },
+                    pp_format: 'Str',
+                    command: `Print Assumptions ${name}.`,
+                    mode: 'Prev',
+                  }, reqTimeout),
+                  retryOpts
+                );
+                const msgs = (paResult as any).messages || [];
+                const msgText = msgs.map((m: any) => typeof m === 'string' ? m : m?.text || '').join('\n');
+                if (msgText.includes('Closed under the global context')) {
+                  // Genuinely proved — keep [Qed]
+                } else if (msgText.length > 0) {
+                  const axiomNames = msgText.split('\n')
+                    .filter((l: string) => l.trim() && !l.includes('Axioms:') && !l.includes('Closed'))
+                    .map((l: string) => l.trim().split(/\s*:/)[0])
+                    .filter((n: string) => n && !n.includes('.'))
+                    .slice(0, 5);
+                  if (axiomNames.length > 0) {
+                    item.text = item.text.replace('[Qed]',
+                      `[Qed*] (depends on admitted: ${axiomNames.join(', ')})`);
                   }
-                } catch {}
+                }
               }
             }
 

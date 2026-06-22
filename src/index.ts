@@ -594,7 +594,7 @@ async function main() {
         },
         {
           name: 'check_file',
-          description: 'Force document checking and return completion status. If you get a timeout, retry with a larger timeout_ms (e.g. 120000). Coq can be slow on large files or cold starts.',
+          description: 'Check the entire file and report ALL errors with diagnostic messages. Each FAILED proof shows the Coq error message and line number. Recommended workflow: (1) write your complete proof using edit_file, (2) call check_file to see all errors at once, (3) fix them all in the next edit. This is much faster than inserting one tactic at a time. If you get a timeout, retry with a larger timeout_ms (e.g. 120000). Coq can be slow on large files or cold starts.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -603,6 +603,7 @@ async function main() {
               count: { type: 'number', description: 'Optional: max items to return (boundary-expanding)' },
               timeout_ms: { type: 'number', description: 'Optional: per-request timeout in ms (default 15000)' },
               retry_timeout_ms: { type: 'number', description: 'Optional: total retry timeout in ms for cold starts (default 300000)' },
+              auto_admit: { type: 'boolean', default: true, description: 'Auto-admit failed proofs with hash-addressable admits so the file compiles and failures are targetable by insert_tactics admit_hash=<hash>. Default: true.' },
             },
             required: ['file'],
           },
@@ -2377,6 +2378,32 @@ async function main() {
                 items.push({ text: entry, startLine: i });
                 i = endLine;
               }
+            }
+
+            // Enrich FAILED proof items with goal state at first error
+            for (const item of items) {
+              if (!item.text.includes('[FAILED]') || !item.text.includes('ERROR L')) continue;
+              const errorMatch = item.text.match(/ERROR L(\d+)/);
+              if (!errorMatch) continue;
+              const errorLine = parseInt(errorMatch[1], 10) - 1;
+              try {
+                const gResult = await retryDocumentNotReady(() =>
+                  lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                    textDocument: { uri: doc.uri, version: doc.version },
+                    position: { line: errorLine, character: 0 },
+                    pp_format: 'Str',
+                    mode: 'Prev',
+                  }, reqTimeout),
+                  retryOpts
+                );
+                const goals = gResult.goals?.goals || [];
+                if (goals.length > 0) {
+                  const goalText = goals[0].ty || String(goals[0]);
+                  const truncGoal = goalText.length > 300 ? goalText.slice(0, 297) + '...' : goalText;
+                  item.text += `\n  goal: ${truncGoal}`;
+                  if (goals.length > 1) item.text += `\n  (${goals.length} subgoals total)`;
+                }
+              } catch {}
             }
 
             // Paginate with boundary expansion

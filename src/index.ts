@@ -270,9 +270,8 @@ async function main() {
       const doc = await docManager.openDocument(path);
       const freshText = await fs.promises.readFile(absPath, 'utf-8');
       if (freshText !== doc.text) {
-        console.error(`[mcp-coq-lsp] Document modified externally, re-syncing: ${path}`);
-        await docManager.closeDocument(path);
-        return await docManager.openDocument(path);
+        console.error(`[mcp-coq-lsp] Document modified externally, incremental re-sync: ${path}`);
+        return await docManager.updateDocument(path, freshText);
       }
       return doc;
     } catch (err: any) {

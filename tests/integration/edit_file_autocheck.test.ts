@@ -82,7 +82,7 @@ describe('edit_file auto-check', () => {
         replace: 'bogus3',
       }, TIMEOUT);
       expect(r.isError).toBe(false);
-      expect(r.text).toMatch(/errors total/);
+      expect(r.text).toMatch(/more error/);
     } finally {
       try { fs.unlinkSync(f); } catch {}
     }

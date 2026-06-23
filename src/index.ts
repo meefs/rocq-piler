@@ -1071,7 +1071,7 @@ async function main() {
             ? `replaced "${find.substring(0, 40)}${find.length > 40 ? '…' : ''}"`
             : `applied ${resolvedEdits.length} edit(s)`;
 
-          // Auto-check: harvest first error after edit
+          // Auto-check: harvest errors after edit
           let autoCheck = '';
           try {
             const diags = lspClient.getDiagnostics(updatedDoc.uri);
@@ -1080,29 +1080,37 @@ async function main() {
               autoCheck = '\n✓ no errors';
               editFailTracker.delete(file);
             } else {
+              // Group errors by proof/line region to deduplicate
+              const MAX_ERRORS = 3;
+              const shown = errors.slice(0, MAX_ERRORS);
+              for (const err of shown) {
+                const errLine = err.range.start.line;
+                const errMsg = err.message.length > 150 ? err.message.slice(0, 147) + '...' : err.message;
+                autoCheck += `\n✗ L${errLine + 1}: ${errMsg}`;
+
+                // Try to get goal state at error
+                try {
+                  const gResult = await lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                    textDocument: { uri: updatedDoc.uri, version: updatedDoc.version },
+                    position: { line: errLine, character: 0 },
+                    pp_format: 'Str',
+                    mode: 'Prev',
+                  }, 5000);
+                  const goals = gResult.goals?.goals || [];
+                  if (goals.length > 0) {
+                    const goalText = (goals[0].ty || String(goals[0]));
+                    const truncGoal = goalText.length > 200 ? goalText.slice(0, 197) + '...' : goalText;
+                    autoCheck += `\n  goal: ${truncGoal}`;
+                  }
+                } catch {}
+              }
+              if (errors.length > MAX_ERRORS) {
+                autoCheck += `\n  ... and ${errors.length - MAX_ERRORS} more error(s)`;
+              }
+
+              // Thrash detection on first error
               const firstErr = errors[0];
-              const errLine = firstErr.range.start.line;
-              const errMsg = firstErr.message.length > 200 ? firstErr.message.slice(0, 197) + '...' : firstErr.message;
-              autoCheck = `\n✗ L${errLine + 1}: ${errMsg}`;
-
-              // Try to get goal state at error
-              try {
-                const gResult = await lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-                  textDocument: { uri: updatedDoc.uri, version: updatedDoc.version },
-                  position: { line: errLine, character: 0 },
-                  pp_format: 'Str',
-                  mode: 'Prev',
-                }, 5000);
-                const goals = gResult.goals?.goals || [];
-                if (goals.length > 0) {
-                  const goalText = (goals[0].ty || String(goals[0]));
-                  const truncGoal = goalText.length > 300 ? goalText.slice(0, 297) + '...' : goalText;
-                  autoCheck += `\n  goal: ${truncGoal}`;
-                }
-              } catch {}
-
-              // Thrash detection
-              const errorKey = `${errLine}:${errMsg.slice(0, 60)}`;
+              const errorKey = `${firstErr.range.start.line}:${firstErr.message.slice(0, 60)}`;
               const tracker = editFailTracker.get(file);
               if (tracker && tracker.errorKey === errorKey) {
                 tracker.count++;
@@ -1111,10 +1119,6 @@ async function main() {
                 }
               } else {
                 editFailTracker.set(file, { errorKey, count: 1 });
-              }
-
-              if (errors.length > 1) {
-                autoCheck += `\n  (${errors.length} errors total)`;
               }
             }
           } catch {}

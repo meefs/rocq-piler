@@ -32,31 +32,13 @@ The most effective approach for AI proof assistants:
 
 ## Benchmarks
 
-| Problem | Profile | Duration | Cost | Tokens (in/out/think) | Tools |
-|---------|---------|----------|------|----------------------|-------|
-| pcf_ref | robust | 1181s | $0.06 | 1K / 8K / 51K | 31 (6 edit, 5 check, 3 stratify, 2 close_admits) |
-| insertion_sort | lean | 206s | $0.03 | 23K / 4K / 17K | 24 (10 search, 5 check, 5 edit) |
-| dep_vec | lean | 565s | $0.07 | 18K / 9K / 57K | 31 (14 edit, 6 check) |
-| mergesort | lean | 1018s | $0.19 | — | 104 |
+| Problem | Duration | Cost | Tools |
+|---------|----------|------|-------|
+| insertion_sort | 206s | $0.03 | search(10), check(5), edit(5) |
+| dep_vec | 565s | $0.07 | edit(14), check(6) |
+| mergesort | 1018s | $0.19 | — |
 
 **Stats are updated as runs complete.** All benchmarks use DeepSeek V4 Pro.
-
-### pcf_ref — PCF + References Type Preservation
-
-A PCF language extended with mutable references (allocation, dereference, assignment), heap semantics, and store typing. The preservation theorem proves that well-typed programs remain well-typed after reduction, with the store typing possibly extended.
-
-**21** step constructors, **10** helper lemmas, **311** lines, solved in **1181s** ($0.06).
-
-Auxiliary lemmas: `extends_refl`, `extends_app`, `extends_nth_error`, `weaken_append`, `has_type_store_weaken`, `heap_ok_store_weaken`, `heap_lookup_typed`, `heap_update_ok`, `shift_closed`, `subst_lemma`.
-
-## Profiles
-
-| Profile | Tools | Use case |
-|---------|-------|----------|
-| `lean` | search_lemmas, edit_file, check_file | Fast iteration for simple proofs |
-| `robust` | lean + stratify, close_admits, reset_proof, focus_proof | Complex multi-case proofs |
-| `full` | All tools | Maximum capability, more overhead |
-| `rocq-mcp` | rocq-mcp tools only | Baseline comparison |
 
 ## Architecture
 
@@ -101,10 +83,10 @@ Add to `~/.config/opencode/opencode.json`:
 
 ```bash
 # Single run
-bash benchmarks/harness/run.sh --model deepseek/deepseek-v4-pro --problem pcf_ref --profile robust
+bash benchmarks/harness/run.sh --model deepseek/deepseek-v4-pro --problem pcf_ref
 
 # Batch sweep
-bash benchmarks/harness/batch.sh --profiles lean,robust --problems insertion_sort,dep_vec,pcf_ref
+bash benchmarks/harness/batch.sh --problems insertion_sort,dep_vec,pcf_ref
 
 # Evaluate
 bash benchmarks/harness/evaluate.sh benchmarks/complete/pcf_ref.v

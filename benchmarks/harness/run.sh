@@ -36,7 +36,7 @@ if [[ ! -f "$INCOMPLETE" ]]; then
 fi
 
 if [[ ! -f "$INSTRUCTIONS" ]]; then
-  PROMPT="Copy benchmarks/incomplete/${PROBLEM}.v to benchmarks/complete/${PROBLEM}.v and prove all Admitted theorems. For conjecture pairs (foo and foo_neg), prove exactly one of each pair. Do not modify the incomplete file. Add all required helper lemmas before the main theorems — most proofs need auxiliary lemmas (e.g. substitution, weakening, inversion) that are not provided in the file. Work incrementally: prove one lemma at a time, checking after each."
+  PROMPT="Copy benchmarks/incomplete/${PROBLEM}.v to benchmarks/complete/${PROBLEM}.v and prove all Admitted theorems. For conjecture pairs (foo and foo_neg), prove exactly one of each pair. Do not modify the incomplete file. Add all required helper lemmas before the main theorems — most proofs need auxiliary lemmas (e.g. substitution, weakening, inversion) that are not provided in the file. Work incrementally: prove one lemma at a time, checking after each. Start with the easiest lemmas first and build up to the harder ones."
 else
   PROMPT="Read benchmarks/incomplete/${PROBLEM}.md and follow the instructions."
 fi

@@ -1158,7 +1158,7 @@ async function main() {
               if (tracker && tracker.errorKey === errorKey) {
                 tracker.count++;
                 if (tracker.count >= 5) {
-                  autoCheck += `\n⚠ same error ${tracker.count} consecutive edits — consider reset_proof or focus_proof to inspect the goal`;
+                  autoCheck += `\n⚠ same error ${tracker.count} consecutive edits — consider reset_proof to start over, or stratify to case-split`;
                 }
               } else {
                 editFailTracker.set(file, { errorKey, count: 1 });

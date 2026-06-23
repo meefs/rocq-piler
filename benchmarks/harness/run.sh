@@ -11,7 +11,7 @@ RESULTS_DIR="$SCRIPT_DIR/results"
 
 MODEL=""
 PROBLEM=""
-PROFILE="default"
+PROFILE="standard"
 TIMEOUT=1800
 
 while [[ $# -gt 0 ]]; do
@@ -66,7 +66,7 @@ resolve_profile() {
   local profile_file
 
   case "$profile" in
-    full|positional|none|rocq-mcp|default|lean|robust)
+    full|positional|none|rocq-mcp|standard|lean|robust)
       profile_file="$SCRIPT_DIR/profiles/${profile}.json"
       ;;
     *)

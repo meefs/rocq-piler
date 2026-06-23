@@ -4,30 +4,16 @@ MCP server providing interactive Coq/Rocq proof development tools via coq-lsp.
 
 ## Tools
 
+- **`edit_file`** — write or modify `.v` files. Reports the first error and goal state after each edit — no need to run coqc separately.
+- **`check_file`** — full file status: all errors, Qed/Admitted counts. Use `mode: "errors"` for compact output. Good for initial assessment and final verification.
 - **`search_lemmas`** — find relevant lemmas in the Coq environment by name or pattern
-- **`edit_file`** — write or modify `.v` files (supports `find`/`replace` or range-based edits)
-- **`check_file`** — verify the file and report errors with diagnostic messages and goal states. Supports `mode: "errors"` (compact: only failures/admitted) and `mode: "first"` (one error at a time)
-- **`focus_proof`** — inspect proof state: goals, bullet stack, admits
-- **`insert_tactics`** — insert tactics into a proof, optionally targeting a specific admit by hash
-- **`stratify`** — case-split a proof and auto-close easy cases
+- **`stratify`** — case-split a proof and auto-close easy cases. Returns hash-addressable admits for survivors.
 - **`close_admits`** — batch-close surviving admits with a portfolio of tactics
-- **`reset_proof`** — wipe a proof body and start fresh with Admitted
+- **`reset_proof`** — wipe a proof body and start fresh
+- **`focus_proof`** — inspect proof state and goal details (debugging)
 
-Most non-trivial proofs need **helper lemmas** (e.g. substitution, weakening, inversion). Add them before the main theorem.
+## Approach
 
-## When to use stratify
+Write proofs and helper lemmas directly with `edit_file`. It gives instant error + goal feedback after every edit.
 
-`edit_file` + `check_file` is faster for most proofs — write the proof directly and iterate.
-
-`stratify` is **only** for hard proofs with many cases where you cannot guess the structure (e.g. theorems requiring induction over a relation with 10+ constructors). It is slower than direct editing because it involves per-case LSP round-trips. Do not reach for it on simple proofs.
-
-When you need it:
-
-1. **`stratify`** — split and auto-close easy cases:
-   - `skeleton`: e.g. `"induction Hstep; intros; inversion Ht; subst"`
-   - `portfolio`: e.g. `["eauto", "econstructor; eauto", "lia"]`
-   - Returns hash-addressable admits for survivors.
-
-2. **`insert_tactics admit_hash=<hash>`** — prove survivors one at a time
-3. **`close_admits`** — batch-close survivors with a tactic portfolio
-4. **`reset_proof`** — start over if stuck
+If a proof has too many cases to write by hand, use `stratify` to split it and auto-close easy cases, then `close_admits` to target survivors.

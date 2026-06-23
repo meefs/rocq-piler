@@ -7,6 +7,7 @@
     }
   },
   "tools": {
+    "rocq-piler_insert_tactics": false,
     "rocq-piler_add_lemma": false,
     "rocq-piler_add_block": false,
     "rocq-piler_delete_lemma": false,

@@ -1085,7 +1085,7 @@ async function main() {
               const shown = errors.slice(0, MAX_ERRORS);
               for (const err of shown) {
                 const errLine = err.range.start.line;
-                const errMsg = err.message.length > 150 ? err.message.slice(0, 147) + '...' : err.message;
+                const errMsg = err.message.length > 500 ? err.message.slice(0, 497) + '...' : err.message;
                 autoCheck += `\n✗ L${errLine + 1}: ${errMsg}`;
 
                 // Try to get goal state at error
@@ -1099,7 +1099,7 @@ async function main() {
                   const goals = gResult.goals?.goals || [];
                   if (goals.length > 0) {
                     const goalText = (goals[0].ty || String(goals[0]));
-                    const truncGoal = goalText.length > 200 ? goalText.slice(0, 197) + '...' : goalText;
+                    const truncGoal = goalText.length > 300 ? goalText.slice(0, 297) + '...' : goalText;
                     autoCheck += `\n  goal: ${truncGoal}`;
                   }
                 } catch {}
@@ -2466,7 +2466,7 @@ async function main() {
                 if (status === 'FAILED') {
                   const itemErrors = errorDetails.filter(e => e.line >= i && e.line <= endLine);
                   for (const e of itemErrors.slice(0, 3)) {
-                    const msg = e.message.length > 200 ? e.message.slice(0, 197) + '...' : e.message;
+                    const msg = e.message.length > 500 ? e.message.slice(0, 497) + '...' : e.message;
                     entry += `\n  ERROR L${e.line + 1}: ${msg}`;
                   }
                   if (itemErrors.length > 3) entry += `\n  ... and ${itemErrors.length - 3} more error(s)`;

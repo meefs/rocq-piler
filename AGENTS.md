@@ -2,33 +2,17 @@
 
 MCP server providing interactive Coq/Rocq proof development tools via coq-lsp.
 
-## Proof Development Workflow
+## Tools
 
-Use these MCP tools for Coq proofs — do NOT use `bash` + `coqc` directly:
+- **`search_lemmas`** — find relevant lemmas in the Coq environment by name or pattern
+- **`edit_file`** — write or modify `.v` files (supports `find`/`replace` or range-based edits)
+- **`check_file`** — verify the file and report errors with diagnostic messages and goal states. Supports `mode: "errors"` (compact: only failures/admitted) and `mode: "first"` (one error at a time)
+- **`focus_proof`** — inspect proof state: goals, bullet stack, admits
+- **`insert_tactics`** — insert tactics into a proof, optionally targeting a specific admit by hash
+- **`stratify`** — case-split a proof and auto-close easy cases
+- **`close_admits`** — batch-close surviving admits with a portfolio of tactics
 
-1. **`search_lemmas`** — explore first: find relevant lemmas before writing proofs
-2. **`edit_file`** — write or modify `.v` files
-3. **`check_file`** — verify the file and see ALL errors with diagnostic messages and goal states in one call
-4. Fix all reported errors in the next `edit_file` call
-5. Repeat until all proofs are `Qed`
-
-This workflow is much faster than running `coqc` via bash. `check_file` reports errors across the entire file at once, with the exact error message and line number for each failure.
-
-### Workflow Example
-
-```
-search_lemmas "(_ + 0 = _)"           # Step 1: explore what's available
-edit_file                              # Step 2: write complete proof
-check_file                             # Step 3: see all errors + goals at once
-edit_file                              # Step 4: fix all errors in one edit
-check_file                             # Step 5: verify — done
-```
-
-Do NOT insert tactics one at a time. Write the complete proof body, then check.
-
-When a proof is hard, **add helper lemmas** before the main theorem using `edit_file`. Break complex goals into smaller lemmas — this is how real Coq proofs work. Write the helpers with their proofs, then use them in the main proof.
-
-Do NOT try to solve everything in one step. Work incrementally — prove one theorem at a time, checking after each one.
+Most non-trivial proofs need **helper lemmas** (e.g. substitution, weakening, inversion). Add them before the main theorem.
 
 ## Build & Test
 
@@ -44,7 +28,7 @@ The `benchmarks/` directory contains a vericoding evaluation corpus used to benc
 - `benchmarks/incomplete/` — Challenge files with `Admitted` proofs. These are checked in.
 - `benchmarks/complete/` — Solutions produced by AI runs. **NEVER check these in.**
 
-**Do not commit anything under `benchmarks/complete/`.** This directory is gitignored. Completed solutions must stay out of version control to prevent AI training data contamination and to preserve the integrity of the benchmark corpus across evaluations.
+**Do not commit anything under `benchmarks/complete/`.** This directory is gitignored.
 
 ### Conjecture pairs
 
@@ -58,4 +42,4 @@ Theorem foo_neg : ~ P.
 Proof. Admitted.
 ```
 
-The solver must prove **exactly one** of each pair. Proving the statement means the conjecture is true; proving the negation means it is false. Either direction is a valid solution. The evaluation harness checks that at least one of each pair is `Qed` and the file compiles with `coqc`.
+The solver must prove **exactly one** of each pair. The evaluation harness checks that at least one of each pair is `Qed` and the file compiles with `coqc`.

@@ -594,11 +594,12 @@ async function main() {
         },
         {
           name: 'check_file',
-          description: 'Check the entire file and report ALL errors with diagnostic messages. Each FAILED proof shows the Coq error message and line number. Recommended workflow: (1) write your complete proof using edit_file, (2) call check_file to see all errors at once, (3) fix them all in the next edit. This is much faster than inserting one tactic at a time. If you get a timeout, retry with a larger timeout_ms (e.g. 120000). Coq can be slow on large files or cold starts.',
+          description: 'Check the file and report errors with diagnostic messages. Each FAILED proof shows the Coq error message, line number, and goal state. Use mode to control output verbosity. If you get a timeout, retry with a larger timeout_ms (e.g. 120000).',
           inputSchema: {
             type: 'object',
             properties: {
               file: { type: 'string' },
+              mode: { type: 'string', enum: ['full', 'errors', 'first'], default: 'full', description: '"full" (default): show all items. "errors": only FAILED/Admitted/Qed*/unchecked — compact. "first": stop after first FAILED item — tight feedback like coqc.' },
               start_line: { type: 'number', description: 'Optional: 0-based start line for paginated summary' },
               count: { type: 'number', description: 'Optional: max items to return (boundary-expanding)' },
               timeout_ms: { type: 'number', description: 'Optional: per-request timeout in ms (default 120000). Increase for large files.' },
@@ -2267,7 +2268,7 @@ async function main() {
         }
 
         case 'check_file': {
-          const { file, start_line, count, timeout_ms, retry_timeout_ms } = args as { file: string; start_line?: number; count?: number; timeout_ms?: number; retry_timeout_ms?: number };
+          const { file, mode: checkMode, start_line, count, timeout_ms, retry_timeout_ms } = args as { file: string; mode?: string; start_line?: number; count?: number; timeout_ms?: number; retry_timeout_ms?: number };
 
           try {
             const doc = await ensureDocumentOpened(file);
@@ -2489,20 +2490,58 @@ async function main() {
               }
             }
 
+            // Apply mode-based filtering
+            const totalItems = items.length;
+            const failedCount = items.filter(it => it.text.includes('[FAILED]')).length;
+            const admittedCount2 = items.filter(it => it.text.includes('[Admitted]')).length;
+            const qedCount = items.filter(it => it.text.includes('[Qed]') && !it.text.includes('[Qed*]')).length;
+            const qedStarCount = items.filter(it => it.text.includes('[Qed*]')).length;
+            const uncheckedCount = items.filter(it => it.text.includes('[unchecked]')).length;
+            const openCount = items.filter(it => it.text.includes('[open]')).length;
+
+            let filteredItems = items;
+            let modeSummary = '';
+            const resolvedMode = (checkMode === 'errors' || checkMode === 'first') ? checkMode : 'full';
+
+            if (resolvedMode === 'errors' || resolvedMode === 'first') {
+              filteredItems = items.filter(it =>
+                it.text.includes('[FAILED]') ||
+                it.text.includes('[Admitted]') ||
+                it.text.includes('[Qed*]') ||
+                it.text.includes('[unchecked]')
+              );
+              if (resolvedMode === 'first') {
+                const firstFailed = filteredItems.findIndex(it => it.text.includes('[FAILED]'));
+                if (firstFailed >= 0) {
+                  filteredItems = [filteredItems[firstFailed]];
+                } else if (filteredItems.length > 0) {
+                  filteredItems = [filteredItems[0]];
+                }
+              }
+              const parts: string[] = [];
+              if (qedCount > 0) parts.push(`${qedCount} Qed`);
+              if (qedStarCount > 0) parts.push(`${qedStarCount} Qed*`);
+              if (failedCount > 0) parts.push(`${failedCount} FAILED`);
+              if (admittedCount2 > 0) parts.push(`${admittedCount2} Admitted`);
+              if (uncheckedCount > 0) parts.push(`${uncheckedCount} unchecked`);
+              if (openCount > 0) parts.push(`${openCount} defs`);
+              modeSummary = `[${parts.join(', ')}]`;
+            }
+
             // Paginate with boundary expansion
             const MAX_ITEMS = 40;
             let startIdx = 0;
-            let endIdx = items.length;
+            let endIdx = filteredItems.length;
             let paginated = false;
             if (start_line !== undefined && count !== undefined && count > 0) {
               paginated = true;
-              startIdx = items.findIndex(it => it.startLine >= start_line);
-              if (startIdx < 0) startIdx = items.length;
-              while (startIdx > 0 && items[startIdx]?.startLine > start_line) startIdx--;
-              endIdx = Math.min(items.length, startIdx + count);
+              startIdx = filteredItems.findIndex(it => it.startLine >= start_line);
+              if (startIdx < 0) startIdx = filteredItems.length;
+              while (startIdx > 0 && filteredItems[startIdx]?.startLine > start_line) startIdx--;
+              endIdx = Math.min(filteredItems.length, startIdx + count);
             }
-            const pageItems = items.slice(startIdx, endIdx);
-            const truncated = paginated ? endIdx < items.length : items.length > MAX_ITEMS;
+            const pageItems = filteredItems.slice(startIdx, endIdx);
+            const truncated = paginated ? endIdx < filteredItems.length : filteredItems.length > MAX_ITEMS;
 
             const MAX_OUTPUT_CHARS = 10000;
             let summaryText = pageItems.map(it => it.text).join('\n');
@@ -2512,16 +2551,17 @@ async function main() {
 
             const summary = pageItems.length > 0
               ? (paginated
-                  ? `\n[${startIdx}-${endIdx-1}/${items.length}]` +
-                    (truncated ? ` (more after L${items[endIdx]?.startLine ?? 0})` : '')
-                  : (items.length > MAX_ITEMS
-                      ? `\n[0-${pageItems.length-1}/${items.length}] (truncated at ${MAX_ITEMS} items)`
+                  ? `\n[${startIdx}-${endIdx-1}/${filteredItems.length}]` +
+                    (truncated ? ` (more after L${filteredItems[endIdx]?.startLine ?? 0})` : '')
+                  : (filteredItems.length > MAX_ITEMS
+                      ? `\n[0-${pageItems.length-1}/${filteredItems.length}] (truncated at ${MAX_ITEMS} items)`
                       : ''))
+                + (modeSummary ? `\n${modeSummary}` : '')
                 + '\n' + summaryText
-              : (items.length > 0 ? `\n${items.length} items total (use count parameter to paginate)` : '');
+              : (filteredItems.length > 0 ? `\n${filteredItems.length} items total (use count parameter to paginate)` : (modeSummary ? `\n${modeSummary}` : ''));
 
             return reply(
-              `${fileLine(file, 0)} — ${result.completed?.status || 'unknown'}, ${spanCount} spans (${loc}) [ws: ${activeWorkspaceRoot}]` + admittedInfo + summary,
+              `${fileLine(file, 0)} — ${result.completed?.status || 'unknown'}, ${spanCount} spans (${loc})` + admittedInfo + summary,
               { file, completed: result.completed?.status, span_count: spanCount, completed_range: loc, admitted: admittedCount, admitted_lines: admittedAt, success: true, workspace_root: activeWorkspaceRoot }
             );
           } catch (error) {

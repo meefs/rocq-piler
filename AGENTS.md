@@ -16,6 +16,8 @@ Most non-trivial proofs need **helper lemmas** (e.g. substitution, weakening, in
 
 Start with the **easy lemmas first** (extends, store weakening, heap operations) — not the hardest (shift, substitution). Build up gradually. If a lemma takes more than a few tries, reset and try a different approach. If a proof has too many cases to write by hand, use `stratify` to split it and `close_admits` to batch-close survivors.
 
+**Never reference auto-generated names** from `destruct`, `inversion`, or `induction`. Coq-lsp and coqc can produce different names for the same proof. Always use `as` clauses (`destruct H as [x y]`, `inversion H as [pattern]`, `induction H as [IH]`) and `subst` to canonicalize. Avoid `rename`.
+
 ## Build & Test
 
 ```bash

@@ -180,6 +180,7 @@ async function main() {
   const lastInsertion = new Map<string, { range: Range }>();
   // Track the active proof per file — used by coq_undo to scope undo to current proof
   const currentProof = new Map<string, string>();
+  const editFailTracker = new Map<string, { errorKey: string; count: number }>();
   // Track position of last replaced admit — used by insert_tactics to land on reopened bullet
   const lastAdmitReplaced = new Map<string, number>();
 
@@ -380,7 +381,7 @@ async function main() {
     const allTools = [
         ...(!DISABLE_EDIT_FILE ? [{
           name: 'edit_file',
-          description: 'Apply text edits to a file and re-sync with rocq-lsp. Use "find"/"replace" for simple text search-and-replace instead of computing line numbers.',
+          description: 'Apply text edits to a file and re-sync with rocq-lsp. Automatically reports the first error with goal state after each edit — no need to call check_file or coqc separately. Use "find"/"replace" for simple text search-and-replace instead of computing line numbers.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -1069,8 +1070,57 @@ async function main() {
           const summary = find !== undefined
             ? `replaced "${find.substring(0, 40)}${find.length > 40 ? '…' : ''}"`
             : `applied ${resolvedEdits.length} edit(s)`;
+
+          // Auto-check: harvest first error after edit
+          let autoCheck = '';
+          try {
+            const diags = lspClient.getDiagnostics(updatedDoc.uri);
+            const errors = diags.filter((d: any) => d.severity === 1);
+            if (errors.length === 0) {
+              autoCheck = '\n✓ no errors';
+              editFailTracker.delete(file);
+            } else {
+              const firstErr = errors[0];
+              const errLine = firstErr.range.start.line;
+              const errMsg = firstErr.message.length > 200 ? firstErr.message.slice(0, 197) + '...' : firstErr.message;
+              autoCheck = `\n✗ L${errLine + 1}: ${errMsg}`;
+
+              // Try to get goal state at error
+              try {
+                const gResult = await lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                  textDocument: { uri: updatedDoc.uri, version: updatedDoc.version },
+                  position: { line: errLine, character: 0 },
+                  pp_format: 'Str',
+                  mode: 'Prev',
+                }, 5000);
+                const goals = gResult.goals?.goals || [];
+                if (goals.length > 0) {
+                  const goalText = (goals[0].ty || String(goals[0]));
+                  const truncGoal = goalText.length > 300 ? goalText.slice(0, 297) + '...' : goalText;
+                  autoCheck += `\n  goal: ${truncGoal}`;
+                }
+              } catch {}
+
+              // Thrash detection
+              const errorKey = `${errLine}:${errMsg.slice(0, 60)}`;
+              const tracker = editFailTracker.get(file);
+              if (tracker && tracker.errorKey === errorKey) {
+                tracker.count++;
+                if (tracker.count >= 5) {
+                  autoCheck += `\n⚠ same error ${tracker.count} consecutive edits — consider reset_proof or focus_proof to inspect the goal`;
+                }
+              } else {
+                editFailTracker.set(file, { errorKey, count: 1 });
+              }
+
+              if (errors.length > 1) {
+                autoCheck += `\n  (${errors.length} errors total)`;
+              }
+            }
+          } catch {}
+
           return reply(
-            `${fileLine(file, 0)} — ${summary}, v${updatedDoc.version}`,
+            `${fileLine(file, 0)} — ${summary}, v${updatedDoc.version}` + autoCheck,
             { file, new_version: updatedDoc.version, found: true }
           );
         }

@@ -2550,28 +2550,27 @@ async function main() {
               const failedItems = items.filter(it => it.text.includes('[FAILED]'));
               if (failedItems.length > 0) {
                 let text = doc.text;
+                let cumOffset = 0;
                 let changed = false;
                 for (const item of failedItems) {
                   const nameMatch = item.text.match(/(?:Lemma|Theorem|Corollary|Example)\s+(\S+)/);
                   const lineMatch = item.text.match(/\[L(\d+)-L(\d+)\]/);
                   if (!nameMatch || !lineMatch) continue;
                   const name = nameMatch[1];
-                  const endLine = parseInt(lineMatch[2], 10);
+                  const endLine = parseInt(lineMatch[2], 10) + cumOffset;
                   const lines = text.split('\n');
+                  if (endLine >= lines.length) continue;
                   const qedLine = endLine;
                   if (!lines[qedLine]?.match(/\bQed\.\s*$/)) continue;
 
                   let hash = 'unknown';
                   try {
-                    const gResult = await retryDocumentNotReady(() =>
-                      lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
-                        textDocument: { uri: doc.uri, version: doc.version },
-                        position: { line: qedLine, character: 0 },
-                        pp_format: 'Str',
-                        mode: 'Prev',
-                      }, reqTimeout),
-                      retryOpts
-                    );
+                    const gResult = await lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                      textDocument: { uri: doc.uri, version: doc.version },
+                      position: { line: qedLine, character: 0 },
+                      pp_format: 'Str',
+                      mode: 'Prev',
+                    }, 5000);
                     const goals = gResult.goals?.goals || [];
                     if (goals.length > 0) {
                       const goalText = goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
@@ -2587,7 +2586,9 @@ async function main() {
                   const indent = ' '.repeat(beforeQed.length - beforeQed.trimEnd().length + 2);
                   lines[qedLine] = beforeQed.trimEnd() + '\n' + indent + '{ (* ' + name + ':' + hash + ' *) admit. }';
                   lines.splice(qedLine + 1, 0, afterQed, 'Admitted.');
+                  const oldLen = text.split('\n').length;
                   text = lines.join('\n');
+                  cumOffset += text.split('\n').length - oldLen;
                   item.text = item.text.replace('[FAILED]', `[auto-admit:${hash}]`);
                   changed = true;
                 }

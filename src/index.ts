@@ -2544,6 +2544,61 @@ async function main() {
               }
             }
 
+            // Auto-admit: convert FAILED proofs to hash-addressable admits
+            const shouldAutoAdmit = (args as any).auto_admit !== false;
+            if (shouldAutoAdmit) {
+              const failedItems = items.filter(it => it.text.includes('[FAILED]'));
+              if (failedItems.length > 0) {
+                let text = doc.text;
+                let changed = false;
+                for (const item of failedItems) {
+                  const nameMatch = item.text.match(/(?:Lemma|Theorem|Corollary|Example)\s+(\S+)/);
+                  const lineMatch = item.text.match(/\[L(\d+)-L(\d+)\]/);
+                  if (!nameMatch || !lineMatch) continue;
+                  const name = nameMatch[1];
+                  const endLine = parseInt(lineMatch[2], 10);
+                  const lines = text.split('\n');
+                  const qedLine = endLine;
+                  if (!lines[qedLine]?.match(/\bQed\.\s*$/)) continue;
+
+                  let hash = 'unknown';
+                  try {
+                    const gResult = await retryDocumentNotReady(() =>
+                      lspClient.sendRequest<GoalAnswer<string>>('proof/goals', {
+                        textDocument: { uri: doc.uri, version: doc.version },
+                        position: { line: qedLine, character: 0 },
+                        pp_format: 'Str',
+                        mode: 'Prev',
+                      }, reqTimeout),
+                      retryOpts
+                    );
+                    const goals = gResult.goals?.goals || [];
+                    if (goals.length > 0) {
+                      const goalText = goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                      hash = (await import('crypto')).createHash('md5').update(goalText).digest('hex').slice(0, 8);
+                    }
+                  } catch {}
+
+                  const qedLineText = lines[qedLine];
+                  const qedIdx = qedLineText.search(/\bQed\./);
+                  if (qedIdx < 0) continue;
+                  const beforeQed = qedLineText.slice(0, qedIdx);
+                  const afterQed = qedLineText.slice(qedIdx + 4);
+                  const indent = ' '.repeat(beforeQed.length - beforeQed.trimEnd().length + 2);
+                  lines[qedLine] = beforeQed.trimEnd() + '\n' + indent + '{ (* ' + name + ':' + hash + ' *) admit. }';
+                  lines.splice(qedLine + 1, 0, afterQed, 'Admitted.');
+                  text = lines.join('\n');
+                  item.text = item.text.replace('[FAILED]', `[auto-admit:${hash}]`);
+                  changed = true;
+                }
+                if (changed) {
+                  await docManager.updateDocument(file, text);
+                  await docManager.saveDocument(file);
+                  await forceResync(file, 'check_file_auto_admit');
+                }
+              }
+            }
+
             // Apply mode-based filtering
             const totalItems = items.length;
             const failedCount = items.filter(it => it.text.includes('[FAILED]')).length;

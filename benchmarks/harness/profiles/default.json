@@ -7,11 +7,7 @@
     }
   },
   "tools": {
-    "rocq-piler_focus_proof": false,
     "rocq-piler_insert_tactics": false,
-    "rocq-piler_stratify": false,
-    "rocq-piler_close_admits": false,
-    "rocq-piler_reset_proof": false,
     "rocq-piler_add_lemma": false,
     "rocq-piler_add_block": false,
     "rocq-piler_delete_lemma": false,

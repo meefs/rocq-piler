@@ -1164,6 +1164,42 @@ async function main() {
                 editFailTracker.set(file, { errorKey, count: 1 });
               }
             }
+
+            // Always check for unsound Qed proofs (depends on admitted/axioms)
+            try {
+              const docLines = updatedDoc.text.split('\n');
+              const PROOF_KWS = ['Lemma', 'Theorem', 'Corollary', 'Example'];
+              const qedProofs: Array<{ name: string; endLine: number }> = [];
+              for (let i = 0; i < docLines.length; i++) {
+                const kw = docLines[i].trim().split(/\s+/)[0];
+                if (!PROOF_KWS.includes(kw)) continue;
+                for (let j = i + 1; j < docLines.length; j++) {
+                  if (docLines[j].trim() === 'Qed.' || /\bQed\.\s*$/.test(docLines[j].trim())) {
+                    qedProofs.push({ name: docLines[i].slice(docLines[i].indexOf(kw) + kw.length).trim().match(/^([^\s(:]+)/)?.[1] || '?', endLine: j });
+                    i = j; break;
+                  }
+                  if (docLines[j].trim() === 'Admitted.') { i = j; break; }
+                }
+              }
+              const unsound: string[] = [];
+              for (const qp of qedProofs.slice(0, 3)) {
+                try {
+                  const st = await lspClient.sendRequest<any>('petanque/get_state_at_pos', {
+                    uri: updatedDoc.uri, position: { line: qp.endLine + 1, character: 0 },
+                  }, 5000);
+                  if (!st?.st) continue;
+                  const pa = await lspClient.sendRequest<any>('petanque/run', { st: st.st, tac: `Print Assumptions ${qp.name}.` }, 5000);
+                  const msg = (pa?.feedback || []).map((f: any) => Array.isArray(f) ? f[1] : String(f)).join('\n');
+                  if (!msg.includes('Closed under the global context') && msg.length > 0) {
+                    const ax = msg.split('\n').filter((l: string) => l.trim() && !l.includes('Axioms:') && !l.includes('Closed')).slice(0, 3).map((l: string) => l.trim().split(/\s*:/)[0]).join(', ');
+                    unsound.push(`${qp.name} depends on: ${ax}`);
+                  }
+                } catch {}
+              }
+              if (unsound.length > 0) {
+                autoCheck += '\n⚠ unsound Qed: ' + unsound.join('; ');
+              }
+            } catch {}
           } catch {}
 
           return reply(

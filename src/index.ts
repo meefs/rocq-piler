@@ -562,6 +562,7 @@ async function main() {
             'Use after stratify to batch-close the survivors. ' +
             'Give it a portfolio of {hashes: [...], tactic: "..."} entries mapping ' +
             'admit hashes to closing tactics; entries are processed in order. ' +
+            'Tactics can be multi-line with bullets, e.g. "intros; induction n; simpl; auto.\\n- rewrite IHn; lia.\\n- reflexivity." ' +
             'The special hash "*" expands to all currently-unclosed admits (not ' +
             'already matched by earlier entries). Per-hash speculative dry-run ' +
             'first: if the tactic closes the goal, the edit is committed; ' +
@@ -2498,6 +2499,10 @@ async function main() {
                   const truncGoal = goalText.length > 300 ? goalText.slice(0, 297) + '...' : goalText;
                   item.text += `\n  goal: ${truncGoal}`;
                   if (goals.length > 1) item.text += `\n  (${goals.length} subgoals total)`;
+                  // Store hash for auto_admit reuse
+                  const allGoalText = goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                  const goalHash = (await import('crypto')).createHash('md5').update(allGoalText).digest('hex').slice(0, 8);
+                  item.text += `\n  hash: ${goalHash}`;
                 }
               } catch {}
             }

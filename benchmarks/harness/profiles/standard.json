@@ -14,7 +14,6 @@
     "rocq-piler_move_lemma": false,
     "rocq-piler_inspect_term": false,
     "rocq-piler_inspect_about": false,
-    "rocq-piler_require_lib": false,
     "rocq-piler_locate_term": false,
     "rocq-mcp_*": false,
     "morph-mcp_*": false,

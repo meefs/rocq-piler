@@ -1,0 +1,77 @@
+{
+  "timestamp": "2026-06-22T20:55:43Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "indexed_ind",
+  "profile": "rocq-mcp",
+  "git_hash": "884e439",
+  "session_id": "ses_10ee1dbadffeNFw8km6iK0Kz05",
+  "duration_s": 2014,
+  "tokens": {
+    "input": 85960,
+    "output": 60879,
+    "reasoning": 167358,
+    "cache_read": 14181504,
+    "cache_write": 0
+  },
+  "cost": 0.2873667419999999,
+  "steps": 113,
+  "mcps": [
+    {
+      "name": "rocq-mcp",
+      "command": "/home/gavin/dev/Scidonia/rocq-mcp/.venv/bin/rocq-mcp",
+      "enabled": true
+    }
+  ],
+  "tools_used": [
+    {
+      "tool": "rocq-mcp_rocq_check",
+      "count": 60
+    },
+    {
+      "tool": "edit",
+      "count": 12
+    },
+    {
+      "tool": "rocq-mcp_rocq_compile_file",
+      "count": 11
+    },
+    {
+      "tool": "todowrite",
+      "count": 6
+    },
+    {
+      "tool": "read",
+      "count": 5
+    },
+    {
+      "tool": "bash",
+      "count": 5
+    },
+    {
+      "tool": "rocq-mcp_rocq_start",
+      "count": 4
+    },
+    {
+      "tool": "write",
+      "count": 3
+    },
+    {
+      "tool": "rocq-mcp_rocq_step_multi",
+      "count": 3
+    },
+    {
+      "tool": "rocq-mcp_rocq_compile",
+      "count": 3
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_indexed_ind_deepseek_deepseek-v4-pro_rocq-mcp_1782161743_Pjsa0i/benchmarks/complete/indexed_ind.v",
+    "compiles": false,
+    "pairs_total": 2,
+    "pairs_resolved": 0,
+    "pairs": {
+      "progress": "unsound",
+      "preservation": "neither"
+    }
+  }
+}

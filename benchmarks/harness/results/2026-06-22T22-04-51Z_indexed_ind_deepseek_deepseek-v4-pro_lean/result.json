@@ -1,0 +1,69 @@
+{
+  "timestamp": "2026-06-22T22:04:51Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "indexed_ind",
+  "profile": "lean",
+  "git_hash": "5185804",
+  "session_id": "ses_10ea29220ffepcXrxMgzmgw1lT",
+  "duration_s": 3121,
+  "tokens": {
+    "input": 103803,
+    "output": 118843,
+    "reasoning": 186774,
+    "cache_read": 76033408,
+    "cache_write": 0
+  },
+  "cost": 0.5866621989999996,
+  "steps": 320,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "tools_used": [
+    {
+      "tool": "edit",
+      "count": 152
+    },
+    {
+      "tool": "bash",
+      "count": 107
+    },
+    {
+      "tool": "read",
+      "count": 43
+    },
+    {
+      "tool": "rocq-piler_check_file",
+      "count": 8
+    },
+    {
+      "tool": "todowrite",
+      "count": 3
+    },
+    {
+      "tool": "grep",
+      "count": 3
+    },
+    {
+      "tool": "rocq-piler_search_lemmas",
+      "count": 2
+    },
+    {
+      "tool": "write",
+      "count": 1
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_indexed_ind_deepseek_deepseek-v4-pro_lean_1782165891_gwxKMN/benchmarks/complete/indexed_ind.v",
+    "compiles": true,
+    "pairs_total": 2,
+    "pairs_resolved": 0,
+    "pairs": {
+      "progress": "neither",
+      "preservation": "neither"
+    }
+  }
+}

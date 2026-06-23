@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-06-22T20:05:42Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "insertion_sort",
+  "profile": "lean",
+  "git_hash": "de99f20",
+  "session_id": "ses_10f0fa723ffeIq0WCRqLivHYVZ",
+  "duration_s": 260,
+  "tokens": {
+    "input": 12563,
+    "output": 3448,
+    "reasoning": 23924,
+    "cache_read": 484480,
+    "cache_write": 0
+  },
+  "cost": 0.031034784999999995,
+  "steps": 17,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "tools_used": [
+    {
+      "tool": "read",
+      "count": 4
+    },
+    {
+      "tool": "rocq-piler_edit_file",
+      "count": 3
+    },
+    {
+      "tool": "rocq-piler_check_file",
+      "count": 3
+    },
+    {
+      "tool": "bash",
+      "count": 3
+    },
+    {
+      "tool": "glob",
+      "count": 2
+    },
+    {
+      "tool": "edit",
+      "count": 2
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_insertion_sort_deepseek_deepseek-v4-pro_lean_1782158742_aSXXGU/benchmarks/complete/insertion_sort.v",
+    "compiles": true,
+    "pairs_total": 1,
+    "pairs_resolved": 1,
+    "pairs": {
+      "insertion_sort_sorted": "proved"
+    }
+  }
+}

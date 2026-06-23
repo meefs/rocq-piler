@@ -1,0 +1,69 @@
+{
+  "timestamp": "2026-06-22T20:09:00Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "mergesort",
+  "profile": "lean",
+  "git_hash": "de99f20",
+  "session_id": "ses_10f0c9f76ffe0E1ZsEe1um52UG",
+  "duration_s": 1873,
+  "tokens": {
+    "input": 88908,
+    "output": 61903,
+    "reasoning": 139427,
+    "cache_read": 27949824,
+    "cache_write": 0
+  },
+  "cost": 0.315150192,
+  "steps": 161,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "tools_used": [
+    {
+      "tool": "bash",
+      "count": 67
+    },
+    {
+      "tool": "edit",
+      "count": 62
+    },
+    {
+      "tool": "read",
+      "count": 15
+    },
+    {
+      "tool": "rocq-piler_search_lemmas",
+      "count": 10
+    },
+    {
+      "tool": "rocq-piler_check_file",
+      "count": 5
+    },
+    {
+      "tool": "write",
+      "count": 4
+    },
+    {
+      "tool": "todowrite",
+      "count": 3
+    },
+    {
+      "tool": "rocq-piler_edit_file",
+      "count": 1
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_mergesort_deepseek_deepseek-v4-pro_lean_1782158940_AMQMeG/benchmarks/complete/mergesort.v",
+    "compiles": true,
+    "pairs_total": 2,
+    "pairs_resolved": 2,
+    "pairs": {
+      "mergesort_perm": "proved",
+      "mergesort_sorted": "proved"
+    }
+  }
+}

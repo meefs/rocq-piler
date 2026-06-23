@@ -1,0 +1,69 @@
+{
+  "timestamp": "2026-06-22T23:07:51Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "pcf_bisim",
+  "profile": "lean",
+  "git_hash": "5185804",
+  "session_id": "ses_10e68e6c1ffe7C7L2Le8yKRhuo",
+  "duration_s": 3600,
+  "tokens": {
+    "input": 124077,
+    "output": 170650,
+    "reasoning": 188849,
+    "cache_read": 75712000,
+    "cache_write": 0
+  },
+  "cost": 0.641193625,
+  "steps": 299,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "tools_used": [
+    {
+      "tool": "edit",
+      "count": 143
+    },
+    {
+      "tool": "bash",
+      "count": 118
+    },
+    {
+      "tool": "read",
+      "count": 17
+    },
+    {
+      "tool": "write",
+      "count": 7
+    },
+    {
+      "tool": "rocq-piler_check_file",
+      "count": 6
+    },
+    {
+      "tool": "todowrite",
+      "count": 4
+    },
+    {
+      "tool": "rocq-piler_edit_file",
+      "count": 3
+    },
+    {
+      "tool": "grep",
+      "count": 2
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_pcf_bisim_deepseek_deepseek-v4-pro_lean_1782169671_Gnpzcb/benchmarks/complete/pcf_bisim.v",
+    "compiles": true,
+    "pairs_total": 2,
+    "pairs_resolved": 0,
+    "pairs": {
+      "bisim_sound": "neither",
+      "bisim_complete": "unsound"
+    }
+  }
+}

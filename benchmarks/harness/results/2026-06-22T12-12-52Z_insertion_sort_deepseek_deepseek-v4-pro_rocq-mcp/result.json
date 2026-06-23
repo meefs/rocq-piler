@@ -1,0 +1,69 @@
+{
+  "timestamp": "2026-06-22T12:12:52Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "insertion_sort",
+  "profile": "rocq-mcp",
+  "git_hash": "f9f881a",
+  "session_id": "ses_110c08b80ffewsl8qcVLfg3Sus",
+  "duration_s": 394,
+  "tokens": {
+    "input": 19161,
+    "output": 4707,
+    "reasoning": 20384,
+    "cache_read": 758656,
+    "cache_write": 0
+  },
+  "cost": 0.032914333000000004,
+  "steps": 22,
+  "mcps": [
+    {
+      "name": "rocq-mcp",
+      "command": "/home/gavin/dev/Scidonia/rocq-mcp/.venv/bin/rocq-mcp",
+      "enabled": true
+    },
+    {
+      "name": "rocq-piler",
+      "command": "",
+      "enabled": true
+    },
+    {
+      "name": "morph-mcp",
+      "command": "",
+      "enabled": true
+    },
+    {
+      "name": "github",
+      "command": "",
+      "enabled": true
+    },
+    {
+      "name": "google-workspace",
+      "command": "",
+      "enabled": true
+    },
+    {
+      "name": "brevo",
+      "command": "",
+      "enabled": true
+    },
+    {
+      "name": "fal-ai-image",
+      "command": "",
+      "enabled": true
+    },
+    {
+      "name": "axiomander",
+      "command": "",
+      "enabled": true
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_insertion_sort_deepseek_deepseek-v4-pro_rocq-mcp_1782130372_IeDrhp/benchmarks/complete/insertion_sort.v",
+    "compiles": true,
+    "pairs_total": 1,
+    "pairs_resolved": 1,
+    "pairs": {
+      "insertion_sort_sorted": "proved"
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "timestamp": "2026-06-22T22:37:48Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "sharing",
+  "profile": "lean",
+  "git_hash": "5185804",
+  "session_id": "ses_10e8467b5ffe7Gf4t8adyeDEVY",
+  "duration_s": 2521,
+  "tokens": {
+    "input": 70777,
+    "output": 153989,
+    "reasoning": 91782,
+    "cache_read": 31110912,
+    "cache_write": 0
+  },
+  "cost": 0.3573858209999999,
+  "steps": 144,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "tools_used": [
+    {
+      "tool": "bash",
+      "count": 61
+    },
+    {
+      "tool": "edit",
+      "count": 30
+    },
+    {
+      "tool": "rocq-piler_edit_file",
+      "count": 26
+    },
+    {
+      "tool": "rocq-piler_check_file",
+      "count": 13
+    },
+    {
+      "tool": "read",
+      "count": 6
+    },
+    {
+      "tool": "write",
+      "count": 4
+    },
+    {
+      "tool": "glob",
+      "count": 2
+    },
+    {
+      "tool": "todowrite",
+      "count": 1
+    },
+    {
+      "tool": "task",
+      "count": 1
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_sharing_deepseek_deepseek-v4-pro_lean_1782167868_xiMvQi/benchmarks/complete/sharing.v",
+    "compiles": true,
+    "pairs_total": 4,
+    "pairs_resolved": 0,
+    "pairs": {
+      "dag_subst_closed_correct": "neither",
+      "share_dup_lt": "neither",
+      "unfold_share": "neither",
+      "share_size_le": "neither"
+    }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "timestamp": "2026-06-22T13:21:35Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "insertion_sort",
+  "profile": "rocq-mcp",
+  "git_hash": "34805e1",
+  "session_id": "ses_11081a374ffexbuKrUrhPVGuEq",
+  "duration_s": 154,
+  "tokens": {
+    "input": 17504,
+    "output": 4283,
+    "reasoning": 7076,
+    "cache_read": 421120,
+    "cache_write": 0
+  },
+  "cost": 0.01902313,
+  "steps": 18,
+  "mcps": [
+    {
+      "name": "rocq-mcp",
+      "command": "/home/gavin/dev/Scidonia/rocq-mcp/.venv/bin/rocq-mcp",
+      "enabled": true
+    }
+  ],
+  "tools_used": [
+    {
+      "tool": "bash",
+      "count": 5
+    },
+    {
+      "tool": "rocq-mcp_rocq_query",
+      "count": 3
+    },
+    {
+      "tool": "rocq-mcp_rocq_compile_file",
+      "count": 2
+    },
+    {
+      "tool": "rocq-mcp_rocq_compile",
+      "count": 2
+    },
+    {
+      "tool": "rocq-mcp_rocq_assumptions",
+      "count": 2
+    },
+    {
+      "tool": "read",
+      "count": 2
+    },
+    {
+      "tool": "edit",
+      "count": 2
+    },
+    {
+      "tool": "rocq-mcp_rocq_start",
+      "count": 1
+    }
+  ],
+  "eval": {
+    "file": "/tmp/bench_insertion_sort_deepseek_deepseek-v4-pro_rocq-mcp_1782134495_cJpZ4F/benchmarks/complete/insertion_sort.v",
+    "compiles": true,
+    "pairs_total": 1,
+    "pairs_resolved": 1,
+    "pairs": {
+      "insertion_sort_sorted": "proved"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "timestamp": "2026-06-22T20:40:16Z",
+  "model": "deepseek/deepseek-v4-pro",
+  "problem": "indexed_ind",
+  "profile": "lean",
+  "git_hash": "c9d245a",
+  "session_id": "ses_10ef0021bffesqaTnfLwEr59uv",
+  "duration_s": 267,
+  "tokens": {
+    "input": 11730,
+    "output": 158,
+    "reasoning": 32047,
+    "cache_read": 21248,
+    "cache_write": 0
+  },
+  "cost": 0.033197924000000004,
+  "steps": 3,
+  "mcps": [
+    {
+      "name": "rocq-piler",
+      "command": "node /home/gavin/dev/Scidonia/rocq-piler/dist/index.js --coq-lsp-path /home/gavin/.opam/rocq-9/bin/coq-lsp",
+      "enabled": true
+    }
+  ],
+  "tools_used": [
+    {
+      "tool": "read",
+      "count": 2
+    }
+  ],
+  "eval": {
+    "compiles": false,
+    "pairs_total": 0,
+    "pairs_resolved": 0,
+    "pairs": {},
+    "error": "file not created"
+  }
+}

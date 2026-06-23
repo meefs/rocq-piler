@@ -66,7 +66,7 @@ resolve_profile() {
   local profile_file
 
   case "$profile" in
-    full|positional|none|rocq-mcp|lean)
+    full|positional|none|rocq-mcp|lean|robust)
       profile_file="$SCRIPT_DIR/profiles/${profile}.json"
       ;;
     *)
@@ -97,7 +97,12 @@ echo "[$RUN_ID] Setting up workspace in $WORKDIR ..." >&2
 mkdir -p "$WORKDIR/benchmarks/incomplete"
 cp -f "$BENCH_DIR/incomplete/${PROBLEM}.v" "$WORKDIR/benchmarks/incomplete/"
 [[ -f "$INSTRUCTIONS" ]] && cp -f "$INSTRUCTIONS" "$WORKDIR/benchmarks/incomplete/"
-cp -f "$REPO_DIR/AGENTS.md" "$WORKDIR/AGENTS.md" 2>/dev/null || true
+# Copy profile-specific AGENTS.md if available, otherwise default
+if [[ -f "$SCRIPT_DIR/profiles/${PROFILE}.agents.md" ]]; then
+  cp -f "$SCRIPT_DIR/profiles/${PROFILE}.agents.md" "$WORKDIR/AGENTS.md"
+else
+  cp -f "$REPO_DIR/AGENTS.md" "$WORKDIR/AGENTS.md" 2>/dev/null || true
+fi
 
 # Minimal _CoqProject for coq-lsp workspace detection
 echo "-R . McpCoqLspBenchmark" > "$WORKDIR/benchmarks/_CoqProject"

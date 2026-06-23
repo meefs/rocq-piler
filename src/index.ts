@@ -1080,48 +1080,6 @@ async function main() {
             if (errors.length === 0) {
               autoCheck = '\n✓ no errors';
               editFailTracker.delete(file);
-
-              // When the file becomes clean, check for unsound Qed proofs
-              try {
-                const docLines = updatedDoc.text.split('\n');
-                const PROOF_KWS = ['Lemma', 'Theorem', 'Corollary', 'Example'];
-                const qedProofs: Array<{ name: string; endLine: number }> = [];
-                for (let i = 0; i < docLines.length; i++) {
-                  const kw = docLines[i].trim().split(/\s+/)[0];
-                  if (!PROOF_KWS.includes(kw)) continue;
-                  for (let j = i + 1; j < docLines.length; j++) {
-                    if (docLines[j].trim() === 'Qed.' || /\bQed\.\s*$/.test(docLines[j].trim())) {
-                      const afterKw = docLines[i].slice(docLines[i].indexOf(kw) + kw.length).trim();
-                      const nm = afterKw.match(/^([^\s(:]+)/)?.[1] || '?';
-                      qedProofs.push({ name: nm, endLine: j });
-                      i = j; break;
-                    }
-                    if (docLines[j].trim() === 'Admitted.') { i = j; break; }
-                  }
-                }
-                const uncheckedItems = qedProofs.filter(qp => {
-                  const prevDiag = lspClient.getDiagnostics(updatedDoc.uri).filter((d: any) => d.severity === 1);
-                  return !prevDiag.some((d: any) => d.range.start.line >= qp.endLine - 2 && d.range.end.line <= qp.endLine + 2);
-                });
-                const unsound: string[] = [];
-                for (const qp of uncheckedItems.slice(0, 3)) {
-                  try {
-                    const st = await lspClient.sendRequest<any>('petanque/get_state_at_pos', {
-                      uri: updatedDoc.uri, position: { line: qp.endLine + 1, character: 0 },
-                    }, 5000);
-                    if (!st?.st) continue;
-                    const pa = await lspClient.sendRequest<any>('petanque/run', { st: st.st, tac: `Print Assumptions ${qp.name}.` }, 5000);
-                    const msg = (pa?.feedback || []).map((f: any) => Array.isArray(f) ? f[1] : String(f)).join('\n');
-                    if (!msg.includes('Closed under the global context') && msg.length > 0) {
-                      const ax = msg.split('\n').filter((l: string) => l.trim() && !l.includes('Axioms:') && !l.includes('Closed')).slice(0, 3).map((l: string) => l.trim().split(/\s*:/)[0]).join(', ');
-                      unsound.push(`${qp.name} depends on: ${ax}`);
-                    }
-                  } catch {}
-                }
-                if (unsound.length > 0) {
-                  autoCheck += '\n⚠ unsound Qed: ' + unsound.join('; ');
-                }
-              } catch {}
             } else {
               // Group errors by proof/line region to deduplicate
               const MAX_ERRORS = 3;
@@ -1166,38 +1124,27 @@ async function main() {
             }
 
             // Always check for unsound Qed proofs (depends on admitted/axioms)
+            // Lightweight: just count Admitted vs Qed. Full Print Assumptions is in check_file.
             try {
               const docLines = updatedDoc.text.split('\n');
               const PROOF_KWS = ['Lemma', 'Theorem', 'Corollary', 'Example'];
-              const qedProofs: Array<{ name: string; endLine: number }> = [];
+              let qedCount = 0;
+              let admitCount = 0;
+              const qedNames: string[] = [];
               for (let i = 0; i < docLines.length; i++) {
                 const kw = docLines[i].trim().split(/\s+/)[0];
                 if (!PROOF_KWS.includes(kw)) continue;
+                const afterKw = docLines[i].slice(docLines[i].indexOf(kw) + kw.length).trim();
+                const nm = afterKw.match(/^([^\s(:]+)/)?.[1] || '?';
                 for (let j = i + 1; j < docLines.length; j++) {
                   if (docLines[j].trim() === 'Qed.' || /\bQed\.\s*$/.test(docLines[j].trim())) {
-                    qedProofs.push({ name: docLines[i].slice(docLines[i].indexOf(kw) + kw.length).trim().match(/^([^\s(:]+)/)?.[1] || '?', endLine: j });
-                    i = j; break;
+                    qedCount++; qedNames.push(nm); i = j; break;
                   }
-                  if (docLines[j].trim() === 'Admitted.') { i = j; break; }
+                  if (docLines[j].trim() === 'Admitted.') { admitCount++; i = j; break; }
                 }
               }
-              const unsound: string[] = [];
-              for (const qp of qedProofs.slice(0, 3)) {
-                try {
-                  const st = await lspClient.sendRequest<any>('petanque/get_state_at_pos', {
-                    uri: updatedDoc.uri, position: { line: qp.endLine + 1, character: 0 },
-                  }, 5000);
-                  if (!st?.st) continue;
-                  const pa = await lspClient.sendRequest<any>('petanque/run', { st: st.st, tac: `Print Assumptions ${qp.name}.` }, 5000);
-                  const msg = (pa?.feedback || []).map((f: any) => Array.isArray(f) ? f[1] : String(f)).join('\n');
-                  if (!msg.includes('Closed under the global context') && msg.length > 0) {
-                    const ax = msg.split('\n').filter((l: string) => l.trim() && !l.includes('Axioms:') && !l.includes('Closed')).slice(0, 3).map((l: string) => l.trim().split(/\s*:/)[0]).join(', ');
-                    unsound.push(`${qp.name} depends on: ${ax}`);
-                  }
-                } catch {}
-              }
-              if (unsound.length > 0) {
-                autoCheck += '\n⚠ unsound Qed: ' + unsound.join('; ');
+              if (qedCount > 0 && admitCount > 0) {
+                autoCheck += `\n⚠ ${qedCount} Qed + ${admitCount} Admitted — Qed proofs may depend on admitted. Check with check_file for Print Assumptions.`;
               }
             } catch {}
           } catch {}

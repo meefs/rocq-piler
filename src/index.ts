@@ -1056,6 +1056,9 @@ async function main() {
             resolvedEdits = (edits || []) as Array<{ range: Range; newText: string }>;
           }
 
+          // Count Qed before edit for regression detection
+          const preQedCount = (doc.text.match(/\bQed\./g) || []).length;
+
           // Apply edits
           pushFileHistory(file, doc.text, currentProof.get(file));
           const newText = docManager.applyEdits(doc.text, resolvedEdits);
@@ -1145,6 +1148,11 @@ async function main() {
               }
               if (qedCount > 0 && admitCount > 0) {
                 autoCheck += `\n⚠ ${qedCount} Qed + ${admitCount} Admitted — Qed proofs may depend on admitted. Check with check_file for Print Assumptions.`;
+              }
+
+              // Qed regression: warn if this edit reduced the number of proved lemmas
+              if (qedCount < preQedCount) {
+                autoCheck += `\n⚠ Qed count dropped from ${preQedCount} to ${qedCount} — this edit removed proved lemma(s). If intentional, ignore; otherwise revert.`;
               }
             } catch {}
           } catch {}

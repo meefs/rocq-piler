@@ -2623,7 +2623,12 @@ async function main() {
                   const afterQed = qedLineText.slice(qedIdx + 4);
                   const indent = ' '.repeat(beforeQed.length - beforeQed.trimEnd().length + 2);
                   lines[qedLine] = beforeQed.trimEnd() + '\n' + indent + '{ (* ' + name + ':' + hash + ' *) admit. }';
-                  lines.splice(qedLine + 1, 0, afterQed, 'Admitted.');
+                  // Only insert Admitted. if not already present on the next non-empty line
+                  let nextLine = qedLine + 1;
+                  if (afterQed.trim()) { lines.splice(nextLine, 0, afterQed); nextLine++; }
+                  if (lines[nextLine]?.trim() !== 'Admitted.') {
+                    lines.splice(nextLine, 0, 'Admitted.');
+                  }
                   const oldLen = text.split('\n').length;
                   text = lines.join('\n');
                   cumOffset += text.split('\n').length - oldLen;

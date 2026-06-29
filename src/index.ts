@@ -3292,6 +3292,12 @@ async function main() {
             // Ensure tactic ends with "." (required by petanque/run)
             if (!tactic.endsWith('.')) tactic += '.';
 
+            // Reject { ... } blocks in tactics — opens a proof, not a tactic
+            if (/\n\s*\{/.test(tactic) || /^\{/.test(tactic.trim())) {
+              results.not_closed.push({ hash: '*', error: 'Tactic contains { ... } block. Use "by (proof)" instead.' });
+              continue;
+            }
+
             // Refresh document
             const doc = await ensureDocumentOpened(file);
             const docLines = doc.text.split('\n');

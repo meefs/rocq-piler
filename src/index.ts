@@ -3333,8 +3333,6 @@ async function main() {
             for (const n of results.not_closed) {
               parts.push(`    ${n.hash}: ${n.error}`);
             }
-          } else {
-            parts.push('  all closed');
           }
 
           // Auto-Qed (once, after all portfolio entries)

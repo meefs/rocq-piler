@@ -1,0 +1,419 @@
+% SEFM 2026 Tool Paper - Springer LNCS format
+% Temporarily using article class for compilation
+% Final submission will use: \documentclass[runningheads]{llncs}
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{xspace}
+
+% Tool name command
+\newcommand{\tool}{\texttt{rocq-piler}\xspace}
+\newcommand{\axm}{\texttt{axiomander}\xspace}
+
+\begin{document}
+
+\title{\tool: A Content-Addressed Proof Oracle for\\ LLM-Driven Discharge of Separation-Logic Obligations}
+
+\author{Gavin Mendel-Gleason\\
+Scidonia, Dublin, Ireland\\
+\texttt{gavin@scidonia.com}}
+
+\maketitle
+
+\begin{abstract}
+We present \tool, a tool that connects Large Language Models (LLMs) to the Rocq
+proof assistant (formerly Coq) through the Model Context Protocol (MCP), and that
+is designed around a single organising idea: \emph{content-addressed proof
+obligations}. Every open goal in a proof is identified by a stable hash of its
+statement and hypotheses, so an LLM can target, batch, and re-target obligations
+by hash rather than by fragile line numbers or bullet positions. On top of this
+substrate \tool provides higher-level moves---\texttt{stratify} (case-split a
+proof and discharge the easy cases with a tactic portfolio) and
+\texttt{close\_admits} (batch-close the survivors)---together with speculative
+execution and an incremental verification cache. Our motivating application is
+the deductive verification system \axm, which compiles imperative programs to
+Iris separation-logic proof obligations. Automation discharges most of these
+obligations, but a residual fraction (in our experience roughly one in five)
+requires an expert. \tool is the \emph{oracle} we are tuning to play that
+expert role. As a self-contained, reproducible case study we report an
+autonomous proof of type preservation for PCF with mutable references (21
+inductive cases, 9 supporting lemmas), completed by two different LLMs through
+\tool's MCP interface at a cost of a few cents per run. The tool is open-source
+and under active development.
+\end{abstract}
+
+\noindent\textbf{Keywords}: Proof assistants, Rocq, Coq, separation logic, Iris,
+LLMs, deductive verification, proof automation, MCP, neurosymbolic AI
+
+\section{Introduction}
+
+Deductive program verifiers such as those built on Iris~\cite{jung2018iris}
+reduce the correctness of imperative programs to a set of \emph{proof
+obligations} in separation logic. Powerful automation can dispatch many of these
+obligations, but not all: a residual tail of obligations---arising from
+non-trivial framing, ghost state, invariants, or arithmetic side conditions---is
+left for a human expert. This tail is precisely where verification projects stall,
+because it demands scarce expertise and tedious interactive proof.
+
+\tool targets this tail. It is a tool that exposes the Rocq proof
+assistant~\cite{coq} to Large Language Models (LLMs) through the Model Context
+Protocol (MCP), with the explicit goal of acting as an \emph{oracle} that an
+automated verifier can call when its own tactics give up. The LLM proposes proof
+steps based on learned patterns; Rocq, accessed through its Language Server
+Protocol interface~\cite{gallego2022coqlsp} and the Pétanque execution backend,
+verifies every step. This division of labour---neural proposal, symbolic
+verification---means the LLM need never be trusted: unsound steps are simply
+rejected.
+
+The novel element of \tool is not the bridge itself but its \emph{interface
+abstraction}. Earlier LLM--prover integrations address goals positionally
+(line/column, bullet nesting), which is brittle: a single inserted tactic
+invalidates every downstream coordinate, and multi-goal proofs quickly become
+unmanageable for an agent. \tool instead makes every open obligation
+\emph{content-addressed}: each goal is identified by a stable hash derived from
+its statement and hypotheses. Identical goals share a hash and can be closed
+together; an obligation can be revisited later by the same hash even after the
+surrounding script has changed. This turns proof construction into a simple
+loop---\emph{enumerate hashes, write a tactic for each hash, repeat until
+\texttt{Qed}}---that is robust under edits and natural for an autonomous agent.
+
+\paragraph{Contributions.}
+\begin{itemize}
+\item A \textbf{content-addressed obligation model} for interactive proof, in
+  which open goals are referenced by stable hashes rather than positions
+  (Section~\ref{sec:hashes}).
+\item Two \textbf{batch proof moves} built on this model---\texttt{stratify}
+  (skeleton case-split plus a per-subgoal closing portfolio) and
+  \texttt{close\_admits} (portfolio-based batch closing of survivors)---plus
+  speculative execution and an \textbf{incremental verification cache} that
+  re-checks only changed functions and their affected callers
+  (Section~\ref{sec:tools}).
+\item An account of \tool as a \textbf{proof oracle for \axm}, an open
+  deductive verifier that emits Iris separation-logic obligations, where roughly
+  one fifth of obligations resist automation and fall to the oracle
+  (Section~\ref{sec:axiomander}).
+\item A \textbf{reproducible case study}: autonomous proof of type preservation
+  for PCF with references (21 cases, 9 lemmas) by two distinct LLMs, with cost
+  and tool-call statistics (Section~\ref{sec:casestudy}).
+\end{itemize}
+
+\textbf{Availability}: \tool is open-source (MIT license), available at
+\url{https://github.com/scidonia/rocq-piler} and published on npm as
+\texttt{rocq-piler}.
+
+\section{Motivation: the Residual Obligations of a Deductive Verifier}
+\label{sec:axiomander}
+
+\axm is a separate open-source deductive verification system. It takes annotated
+imperative code and produces proof obligations in Iris, a higher-order
+concurrent separation logic embedded in Rocq~\cite{jung2018iris}. Like other
+verifiers in this family, \axm discharges a large majority of its obligations
+automatically through built-in tactics and heuristics. The difficulty is the
+remainder.
+
+In our experience, automation alone leaves on the order of \textbf{20\% of
+obligations} unproved. These are the obligations that require genuine proof
+engineering: choosing how to frame a heap assertion, supplying an existential
+witness for ghost state, strengthening a loop invariant, or closing an
+arithmetic side goal that the automation cannot see through. Historically this
+20\% is handled by a human expert working interactively in Rocq---the bottleneck
+that limits how much code a verification effort can cover.
+
+\tool is our attempt to automate that expert. Rather than extending \axm's
+internal automation, we treat the leftover obligations as ordinary Rocq goals
+and hand them to an LLM-driven oracle that interacts with Rocq through \tool. The
+verifier remains responsible for soundness---every obligation is still a Rocq
+goal checked by Rocq's kernel---while the oracle supplies the creative,
+hard-to-automate proof steps. Because the oracle is an LLM behind an MCP
+interface, it can be \emph{tuned}: the tool surface, the prompting, the closing
+portfolios, and the model itself are all parameters we adjust to raise the
+fraction of the residual obligations that close without a human.
+
+This integration is an early-stage prototype. In this paper we therefore use a
+self-contained Rocq development---type preservation for PCF with
+references---as a faithful, reproducible stand-in for the kind of obligation the
+oracle must close: deep induction, auxiliary lemmas about substitution and
+weakening, and reasoning about a mutable store. It exercises exactly the
+oracle behaviours that the \axm tail requires, without depending on the full
+\axm pipeline.
+
+\section{The Content-Addressed Obligation Model}
+\label{sec:hashes}
+
+\subsection{From positions to hashes}
+
+A Rocq proof in progress is a tree of open goals beneath a partially written
+script. Addressing those goals by position is fragile: inserting a tactic shifts
+every subsequent line, and Rocq's bullet discipline ($-$, $+$, $*$, braces)
+makes the ``current'' goal depend on subtle structural context. For an
+autonomous agent that edits the script repeatedly, positional addressing is a
+constant source of stale references.
+
+\tool replaces positions with content. Each open obligation is sealed as a named
+\texttt{admit} annotated with an 8-character hash computed from the goal's
+statement and its hypothesis context. The hash has two properties that drive the
+whole workflow:
+
+\begin{itemize}
+\item \textbf{Stability}: the hash depends only on the goal, not on where it sits
+  in the script. An obligation can be revisited by the same hash after unrelated
+  edits elsewhere.
+\item \textbf{Coalescence}: syntactically identical goals share a hash. A proof
+  that produces four copies of the goal \texttt{True}, possibly at different
+  bullet depths, exposes a single hash that closes all four at once.
+\end{itemize}
+
+\subsection{The core loop}
+
+Proof construction with \tool reduces to a short cycle:
+
+\begin{enumerate}
+\item \texttt{focus\_proof} returns the proof state, the script so far, and the
+  list of open obligations---each with its hash, hypotheses, and goal.
+\item For each hash, \texttt{insert\_tactics} commits a tactic (or a multi-line
+  block) targeting that obligation by hash. If the tactic leaves several goals,
+  they are re-sealed as fresh hash-addressable admits.
+\item Repeat until no obligations remain, at which point the proof is closed
+  automatically with \texttt{Qed}.
+\end{enumerate}
+
+Crucially, the agent reads hypotheses-plus-goal for every obligation directly
+from the \texttt{focus\_proof} (or \texttt{insert\_tactics}) response, so it can
+write each case's tactic without re-querying the prover for context.
+
+\section{Tool Architecture and Higher-Level Moves}
+\label{sec:tools}
+
+\subsection{System overview}
+
+\tool is implemented in TypeScript on top of three layers:
+
+\begin{enumerate}
+\item an \textbf{MCP server} exposing the tool surface to any MCP-compatible
+  client (e.g.\ Claude, OpenCode, custom agents);
+\item an \textbf{LSP/Pétanque client} that drives \texttt{rocq-lsp} for document
+  synchronisation, diagnostics, and speculative state execution; and
+\item a \textbf{workspace manager} that detects project roots
+  (\texttt{\_CoqProject}, \texttt{\_RocqProject}, \texttt{dune-project}) and
+  keeps the language server aligned with the right project.
+\end{enumerate}
+
+\subsection{Core obligation tools}
+
+\begin{itemize}
+\item \texttt{focus\_proof}: one-stop entry point---returns goal state, the
+  script up to the cursor, and every open admit with its hash, hypotheses, and
+  goal.
+\item \texttt{insert\_tactics}: insert a tactic or multi-line block; target a
+  specific obligation with \texttt{admit\_hash}; supports speculative
+  \texttt{dry\_run} evaluation and \texttt{replace} for retry.
+\item \texttt{open\_goals} / \texttt{proof\_state}: lighter-weight goal queries.
+\item \texttt{add\_lemma} / \texttt{delete\_lemma}: insert or remove helper
+  lemma stubs above a target proof.
+\item \texttt{reset\_proof} / \texttt{undo\_step} / \texttt{delete\_step}:
+  structured rollback of a proof body or of recent edits.
+\end{itemize}
+
+\subsection{Batch moves: \texttt{stratify} and \texttt{close\_admits}}
+
+Two moves make multi-case proofs tractable for an agent.
+
+\paragraph{\texttt{stratify}} runs a \emph{skeleton} tactic that case-splits the
+proof (for example, \texttt{induction H; intros; inversion Ht; subst}), then
+attempts each resulting subgoal independently with every tactic in a
+\emph{closing portfolio}, each wrapped in \texttt{solve[\ldots]} so that partial
+progress never leaks between cases. Solved cases have their winning tactic
+inlined; unsolved cases become labelled, hash-addressable admit bullets. A
+single \texttt{stratify} call can thus dispatch the routine majority of an
+induction and report only the genuine survivors, by hash.
+
+\paragraph{\texttt{close\_admits}} takes a portfolio mapping hashes (or the
+wildcard \texttt{*}) to closing tactics and applies them speculatively: a tactic
+is committed only if it closes its target obligation, otherwise the obligation is
+left untouched. This lets the agent sweep up survivors in one call while
+guaranteeing the script never regresses.
+
+Together these moves implement the natural strategy for a hard goal: split it,
+auto-close what you can, and spend the LLM's attention only on the residue---the
+same shape as the \axm problem of automating the 20\% tail.
+
+\subsection{Speculative execution and knowledge search}
+
+\tool exposes the Pétanque API (\texttt{snap\_state}, \texttt{exec\_tactic},
+\texttt{state\_goals}) and a \texttt{dry\_run} mode so an agent can test a tactic
+without modifying the file. Knowledge tools---\texttt{search\_lemmas},
+\texttt{inspect\_term}, \texttt{inspect\_about}, \texttt{locate\_term},
+\texttt{require\_lib}---let the agent discover applicable lemmas and definitions
+before committing.
+
+\subsection{Incremental verification cache}
+
+Because an oracle is invoked repeatedly over an evolving development, \tool
+caches verification at the granularity of individual functions/proofs. It tracks
+separate hashes for a proof's body, its contract/statement, and the contracts of
+its callees, and re-verifies only what changed plus the transitive callers
+affected by a contract change. Unchanged, previously verified obligations return
+instantly. This keeps the cost of repeatedly consulting the oracle low---an
+essential property when it is wired into a verifier's inner loop.
+
+\section{Case Study: Type Preservation for PCF with References}
+\label{sec:casestudy}
+
+\subsection{Problem}
+
+As a reproducible proxy for the \axm residual obligations, we verify type
+preservation for PCF extended with mutable references:
+\[
+\frac{\Gamma; \Sigma \vdash e : \tau \quad (e,\mu) \rightarrow (e',\mu')
+      \quad \mu : \Sigma}
+     {\exists\,\Sigma' \supseteq \Sigma.\;\; \mu' : \Sigma'
+      \;\wedge\; \Gamma; \Sigma' \vdash e' : \tau}
+\]
+The development includes a typed store, store-typing extension, and a de~Bruijn
+substitution calculus. The proof requires 21 inductive step cases and 9
+supporting lemmas covering store extension (\texttt{extends\_refl},
+\texttt{extends\_trans}, \texttt{nth\_error\_extends}), weakening
+(\texttt{store\_weakening}, \texttt{heap\_ok\_extends}), shifting and
+substitution (\texttt{shift\_typing}, \texttt{subst\_preserves\_typing}), and
+heap invariants (\texttt{heap\_lookup\_has\_type}, \texttt{heap\_update\_ok}).
+
+\subsection{Autonomous process}
+
+The proof was driven entirely through \tool's MCP interface. The agent
+proceeded as the architecture intends:
+
+\begin{enumerate}
+\item Introduce auxiliary lemma stubs with \texttt{add\_lemma} and prove each by
+  the focus/insert loop; the substitution and shifting lemmas required a
+  generalised induction (over an arbitrary context prefix) that the agent
+  discovered after an initial formulation failed and was reset.
+\item Attack preservation with a single \texttt{stratify}: a skeleton induction
+  over the step relation plus a closing portfolio, which discharged 18 of the
+  21 cases automatically and left three survivors (\texttt{S\_AppAbs},
+  \texttt{S\_DerefLoc}, \texttt{S\_AssignV}) addressed by hash.
+\item Close the three survivors individually with \texttt{insert\_tactics}
+  targeted by \texttt{admit\_hash}, invoking the substitution and heap lemmas.
+\end{enumerate}
+
+\subsection{Results}
+
+The full development closes with \texttt{Qed} on all 9 lemmas and the main
+theorem, with no remaining admits. We ran the task with two distinct
+models---an open-weight model (DeepSeek~V4) and a proprietary model (a Claude
+release)---each completing the proof through the same MCP interface. A
+representative DeepSeek~V4 run used \textbf{50 API calls} at an actual provider
+cost of \textbf{about four cents} (\$0.04). The \texttt{stratify}/\texttt{close\_admits}
+pattern was decisive: the bulk of the 21 cases never reached the model as
+individual problems, mirroring the goal of letting the oracle spend effort only
+on the genuinely hard obligations.
+
+\begin{table}[t]
+\centering
+\caption{Selected case-study statistics (DeepSeek~V4 run).}
+\begin{tabular}{lr}
+\hline
+Inductive step cases & 21\\
+Auxiliary lemmas & 9\\
+Cases auto-closed by a single \texttt{stratify} & 18\\
+Hash-addressed survivors closed individually & 3\\
+Total API calls & 50\\
+Actual provider cost & \$0.04\\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Related Work}
+
+\textbf{Separation-logic verification.} Iris~\cite{jung2018iris} underpins a
+family of deductive verifiers whose automation leaves a residual tail of
+interactive obligations; \axm sits in this family, and \tool targets that tail
+rather than the logic itself.
+
+\textbf{LLM-based theorem proving.} Baldur~\cite{first2023baldur} generates and
+repairs Coq proofs with retrieval-augmented LLMs, and
+LeanDojo~\cite{yang2023leandojo} provides a learning environment for Lean. These
+focus on model training and bespoke environments; \tool instead standardises the
+\emph{interaction protocol} (MCP) and contributes the content-addressed
+obligation model and batch moves, so any MCP-capable model can serve as the
+oracle.
+
+\textbf{Prover interfaces.} \texttt{coq-lsp}~\cite{gallego2022coqlsp} provides
+the LSP foundation \tool builds on; earlier IDE-oriented tools such as
+CoqPIE~\cite{roe2016coqpie} and Proof General~\cite{aspinall2000proof} target
+human users. \tool adds an agent-oriented layer: hash-addressed goals,
+speculative execution, batch closing, and an incremental cache.
+
+\section{Status, Lessons, and Future Work}
+
+The \axm integration is a working prototype: leftover Iris obligations can be
+routed to the oracle, and we are actively tuning the tool surface, prompting,
+and closing portfolios to increase the share of the 20\% tail that closes
+without a human. Two design lessons stand out. First, \emph{addressing
+obligations by content rather than position} is what makes autonomous,
+multi-goal proof construction robust to the agent's own edits. Second,
+\emph{batch moves with speculative, non-regressing semantics}
+(\texttt{stratify}, \texttt{close\_admits}) match how the residual-obligation
+problem actually decomposes: auto-close the routine majority, escalate only the
+survivors.
+
+Future work includes (i) end-to-end evaluation on real \axm obligation suites
+with success-rate and cost reporting; (ii) feeding verifier-side context (framing
+hints, ghost-state signatures) into the oracle's prompts; and (iii) learning
+closing portfolios from past successful discharges.
+
+\section{Conclusion}
+
+\tool reframes LLM-driven proving around content-addressed obligations and
+batch, speculative closing moves, and positions the result as a tunable oracle
+for the hard tail of a separation-logic verifier, \axm. A reproducible PCF+references
+case study---21 cases and 9 lemmas, closed autonomously by two different models
+for a few cents---demonstrates the workflow on exactly the kind of goal the
+oracle must handle. The tool is open-source and under active development.
+
+\textbf{Tool availability}: \url{https://github.com/scidonia/rocq-piler}
+
+\bibliographystyle{splncs04}
+\begin{thebibliography}{9}
+
+\bibitem{coq}
+{The Coq Development Team}:
+The Coq Proof Assistant.
+\url{https://doi.org/10.5281/zenodo.14542673} (2024)
+
+\bibitem{jung2018iris}
+Jung, R., Krebbers, R., Jourdan, J.-H., Bizjak, A., Birkedal, L., Dreyer, D.:
+Iris from the ground up: A modular foundation for higher-order concurrent
+separation logic.
+Journal of Functional Programming \textbf{28}, e20 (2018)
+
+\bibitem{first2023baldur}
+First, E., Rabe, M.N., Ringer, T., Brun, Y.:
+Baldur: Whole-Proof Generation and Repair with Large Language Models.
+In: Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE) (2023)
+
+\bibitem{yang2023leandojo}
+Yang, K., Swope, A.M., Gu, A., Chalamala, R., Song, P., Yu, S., Godil, S., Prenger, R., Anandkumar, A.:
+LeanDojo: Theorem Proving with Retrieval-Augmented Language Models.
+In: Advances in Neural Information Processing Systems (NeurIPS) (2023)
+
+\bibitem{gallego2022coqlsp}
+Gallego Arias, E.J., et~al.:
+Rocq-lsp: Visual Studio Code Extension and Language Server Protocol for Rocq, v0.2.5.
+\url{https://github.com/ejgallego/rocq-lsp} (2025)
+
+\bibitem{roe2016coqpie}
+Roe, K.:
+CoqPIE: A Plugin for Integrated Development Environments.
+In: Conference on Intelligent Computer Mathematics (CICM) (2016)
+
+\bibitem{aspinall2000proof}
+Aspinall, D.:
+Proof General: A Generic Tool for Proof Development.
+In: Tools and Algorithms for the Construction and Analysis of Systems (TACAS) (2000)
+
+\end{thebibliography}
+
+\end{document}

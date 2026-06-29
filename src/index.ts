@@ -3169,27 +3169,36 @@ async function main() {
             }
             if (targetLine < 0) return { closed: false, error: `admit not found for hash "${hash}"` };
 
-            // Dry-run: try tactic via Pétanque (skip if starts with {, petanque rejects)
+            // Dry-run: verify tactic FULLY closes the goal via solve[].
+            // This prevents committing destructive tactics that leave
+            // subgoals with consumed (mangled) context.
+            let fullyClosed = false;
             if (!tactic.trim().startsWith('{')) {
               const { snapLine, snapChar } = admitSnapPosition(
                 currentDocLines, targetLine, currentBounds.proofLine
               );
               try {
-                const freshDoc = docManager.getDocument(file)!;
+                const dryDoc = docManager.getDocument(file)!;
                 const stateR = await retryDocumentNotReady(() =>
                   lspClient.sendRequest<RunResult<number>>('petanque/get_state_at_pos', {
-                    uri: freshDoc.uri,
+                    uri: dryDoc.uri,
                     position: { line: snapLine, character: snapChar },
                     opts: { memo: false },
                   })
                 );
+                // Run as solve[] — fails if any subgoal remains
+                const tacBody = tactic.replace(/\.+$/, '');
                 await lspClient.sendRequest<RunResult<number>>('petanque/run', {
-                  st: stateR.st, tac: tactic, opts: { memo: false },
+                  st: stateR.st, tac: `solve [ ${tacBody} ].`, opts: { memo: false },
                 });
+                fullyClosed = true;
               } catch (e: any) {
                 const msg = e?.message || String(e);
-                return { closed: false, error: msg };
+                return { closed: false, error: `tactic did not fully close goal (${msg}). Use stratify for multi-branch proofs.` };
               }
+            } else {
+              // { }-starting tactics are proof blocks — safe to seal leftovers
+              fullyClosed = true;
             }
 
             // Commit: apply replaceAllMatchingAdmits
@@ -3257,7 +3266,16 @@ async function main() {
                     return { closed: false, error: `tactic error: ${errMsg}` };
                   }
                   const nFocused = goalsR?.goals?.goals?.length ?? 0;
+                  if (nFocused > 0 && fullyClosed) {
+                    // Defensive: solve[] said fully closed but residue detected.
+                    // Roll back — something is inconsistent.
+                    await docManager.updateDocument(file, preEditText);
+                    await docManager.saveDocument(file);
+                    await forceResync(file, 'close_admits');
+                    return { closed: false, error: 'internal: solve[] passed but residue detected' };
+                  }
                   if (nFocused > 0) {
+                    // Only seal for { }-block tactics where context is preserved
                     const goals = goalsR?.goals?.goals || [];
                     const sealHashes = goals.map((g: any) => {
                       const gt = (g.ty || '').replace(/\s+/g, ' ');

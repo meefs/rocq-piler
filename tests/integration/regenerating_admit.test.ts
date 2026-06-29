@@ -22,74 +22,106 @@ function writeTemp(suffix: string, content: string): string {
   return p;
 }
 
-// Bug: when close_admits applies a tactic that introduces hypotheses (edestruct),
-// remaining subgoals lose access to those hypotheses after sealing.
-// This prevents closing them in subsequent close_admits calls.
-describe('close_admits preserves context for remaining admits', () => {
-  it('remaining admit has access to edestruct-level hypotheses after sealing', async () => {
-    const f = writeTemp('edestruct_context', [
+// close_admits now uses solve[] to verify tactics fully close.
+// Partial tactics that leave subgoals are REJECTED (not sealed)
+// to prevent the "regenerating admit with mangled context" bug.
+describe('close_admits solve[] guard', () => {
+  it('rejects partial tactics that leave subgoals open', async () => {
+    const f = writeTemp('partial_reject', [
       'Lemma test : True /\\ True.',
       'Proof.',
       '  { (* test:aaaaaaaa *) admit. }',
       'Admitted.',
     ].join('\n') + '\n');
     try {
-      // Apply a tactic that uses edestruct-like pattern: splits and leaves one branch
-      const r1 = await h.callTool('close_admits', {
+      const r = await h.callTool('close_admits', {
         file: f,
         name: 'test',
         portfolio: [{ hashes: '*', tactic: 'split; [exact I| ]' }],
       }, TIMEOUT);
-      console.log('r1:', r1.text);
-
-      // Now the remaining admit should be closeable
-      const r2 = await h.callTool('close_admits', {
-        file: f,
-        name: 'test',
-        portfolio: [{ hashes: '*', tactic: 'exact I' }],
-      }, TIMEOUT);
-      console.log('r2:', r2.text);
-
-      // The proof should now be Qed
-      const check = await h.callTool('check_file', {
-        file: f,
-        mode: 'errors',
-        auto_admit: false,
-      }, TIMEOUT);
-      expect(check.text).toMatch(/\[Qed\]/);
+      // Should be rejected — not closed
+      expect(r.text).toMatch(/did not fully close|not closed/);
+      // File should be unchanged — no partial commit
+      const content = fs.readFileSync(f, 'utf-8');
+      expect(content).toMatch(/admit\./);
+      expect(content).not.toMatch(/split/);
     } finally {
       try { fs.unlinkSync(f); } catch {}
     }
   });
 
-  it('remaining admit is closeable after split', async () => {
-    const f = writeTemp('split_close', [
+  it('accepts complete tactics that fully close all subgoals', async () => {
+    const f = writeTemp('complete_accept', [
       'Lemma test : True /\\ True.',
       'Proof.',
       '  { (* test:bbbbbbbb *) admit. }',
       'Admitted.',
     ].join('\n') + '\n');
     try {
-      const r1 = await h.callTool('close_admits', {
+      const r = await h.callTool('close_admits', {
+        file: f,
+        name: 'test',
+        portfolio: [{ hashes: '*', tactic: 'split; [exact I|exact I]' }],
+      }, TIMEOUT);
+      expect(r.text).toMatch(/closed 1/);
+      // File should have Qed
+      const content = fs.readFileSync(f, 'utf-8');
+      expect(content).toMatch(/Qed\./);
+    } finally {
+      try { fs.unlinkSync(f); } catch {}
+    }
+  });
+
+  it('rejects wrong tactics with Coq errors', async () => {
+    const f = writeTemp('wrong_reject', [
+      'Lemma test : True.',
+      'Proof.',
+      '  { (* test:cccccccc *) admit. }',
+      'Admitted.',
+    ].join('\n') + '\n');
+    try {
+      const r = await h.callTool('close_admits', {
+        file: f,
+        name: 'test',
+        portfolio: [{ hashes: '*', tactic: 'exact bogus' }],
+      }, TIMEOUT);
+      expect(r.text).toMatch(/did not fully close|not closed/);
+      // File unchanged
+      const content = fs.readFileSync(f, 'utf-8');
+      expect(content).toMatch(/admit\./);
+    } finally {
+      try { fs.unlinkSync(f); } catch {}
+    }
+  });
+
+  it('does not produce regenerating admits', async () => {
+    // The core test: a partial tactic must NOT leave a sealed admit
+    // that can't be closed later. It should leave the original admit intact.
+    const f = writeTemp('no_regen', [
+      'Lemma test : True /\\ True.',
+      'Proof.',
+      '  { (* test:dddddddd *) admit. }',
+      'Admitted.',
+    ].join('\n') + '\n');
+    try {
+      // Attempt partial tactic — should be rejected
+      await h.callTool('close_admits', {
         file: f,
         name: 'test',
         portfolio: [{ hashes: '*', tactic: 'split; [exact I| ]' }],
       }, TIMEOUT);
-      console.log('--- r1 ---');
-      console.log(r1.text);
-      console.log('--- file after r1 ---');
-      console.log(fs.readFileSync(f, 'utf-8'));
 
-      // Second call should close the remaining branch
+      // Now try the complete tactic — should succeed
       const r2 = await h.callTool('close_admits', {
         file: f,
         name: 'test',
-        portfolio: [{ hashes: '*', tactic: 'exact I' }],
+        portfolio: [{ hashes: '*', tactic: 'split; [exact I|exact I]' }],
       }, TIMEOUT);
-      console.log('--- r2 ---');
-      console.log(r2.text);
-      console.log('--- file after r2 ---');
-      console.log(fs.readFileSync(f, 'utf-8'));
+      expect(r2.text).toMatch(/closed 1/);
+
+      const content = fs.readFileSync(f, 'utf-8');
+      expect(content).toMatch(/Qed\./);
+      expect(content).not.toMatch(/admit\./);
     } finally {
       try { fs.unlinkSync(f); } catch {}
     }

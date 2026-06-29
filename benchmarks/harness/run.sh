@@ -66,7 +66,7 @@ resolve_profile() {
   local profile_file
 
   case "$profile" in
-    full|positional|none|rocq-mcp|standard|lean|robust)
+    full|positional|none|rocq-mcp|standard|lean|robust|working-admits)
       profile_file="$SCRIPT_DIR/profiles/${profile}.json"
       ;;
     *)

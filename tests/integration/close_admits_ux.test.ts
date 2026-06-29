@@ -23,8 +23,8 @@ function writeTemp(suffix: string, content: string): string {
 }
 
 describe('close_admits UX fixes', () => {
-  it('rejects { ... } blocks with a clear error', async () => {
-    const f = writeTemp('brace', [
+  it('supports { ... } proof blocks in tactics', async () => {
+    const f = writeTemp('brace_ok', [
       'Lemma test : True.',
       'Proof.',
       '  { (* test:aaaaaaaa *) admit. }',
@@ -34,9 +34,9 @@ describe('close_admits UX fixes', () => {
       const r = await h.callTool('close_admits', {
         file: f,
         name: 'test',
-        portfolio: [{ hashes: '*', tactic: 'assert (I : True). { exact I. }' }],
+        portfolio: [{ hashes: '*', tactic: 'assert (I : True). { exact I. } exact I.' }],
       }, TIMEOUT);
-      expect(r.text).toMatch(/contains.*\{|Use.*by/i);
+      expect(r.text).toMatch(/closed 1/);
     } finally {
       try { fs.unlinkSync(f); } catch {}
     }

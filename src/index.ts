@@ -3169,8 +3169,8 @@ async function main() {
             }
             if (targetLine < 0) return { closed: false, error: `admit not found for hash "${hash}"` };
 
-            // Speculative dry-run: try the tactic via Pétanque before editing
-            {
+            // Dry-run: try tactic via Pétanque (skip if starts with {, petanque rejects)
+            if (!tactic.trim().startsWith('{')) {
               const { snapLine, snapChar } = admitSnapPosition(
                 currentDocLines, targetLine, currentBounds.proofLine
               );

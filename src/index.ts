@@ -3186,12 +3186,18 @@ async function main() {
                     opts: { memo: false },
                   })
                 );
-                // Run as solve[] — fails if any subgoal remains.
-                // Replace . separators with ; to avoid breaking solve[] parser.
-                const tacBody = tactic.replace(/\.+$/, '').replace(/\.\s+/g, '; ');
-                await lspClient.sendRequest<RunResult<number>>('petanque/run', {
-                  st: stateR.st, tac: `solve [ ${tacBody} ].`, opts: { memo: false },
+                // Run tactic, then check if any goals remain
+                const runR = await lspClient.sendRequest<RunResult<number>>('petanque/run', {
+                  st: stateR.st, tac: tactic, opts: { memo: false },
                 });
+                const goalsR = await lspClient.sendRequest<GoalConfig<string>>('petanque/goals', {
+                  st: runR.st, opts: { compact: true },
+                });
+                if ((goalsR.goals?.length ?? 0) > 0) {
+                  const leftover = goalsR.goals.map((g: any) => (g.ty || '').replace(/\s+/g, ' ')).join(' | ');
+                  return { closed: false, error: `tactic left ${goalsR.goals.length} open subgoal(s): ${leftover}. Use stratify for multi-branch proofs.` };
+                }
+                fullyClosed = true;
                 fullyClosed = true;
               } catch (e: any) {
                 const msg = e?.message || String(e);

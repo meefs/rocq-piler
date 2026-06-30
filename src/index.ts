@@ -381,7 +381,7 @@ async function main() {
     const allTools = [
         ...(!DISABLE_EDIT_FILE ? [{
           name: 'edit_file',
-          description: 'Apply text edits to a file and re-sync with rocq-lsp. Automatically reports the first error with goal state after each edit — no need to call check_file or coqc separately. Use "find"/"replace" for simple text search-and-replace instead of computing line numbers.',
+          description: 'Apply text edits to a file and re-sync with rocq-lsp. Replaces bash+coqc entirely — reports the first errors with goal states after every edit, so you always know if it compiled. Use for anything: single-tactic fixes, entire lemma proofs, or bulk edits replacing many admits at once. Use "find"/"replace" for text matching instead of computing line numbers.',
           inputSchema: {
             type: 'object',
             properties: {

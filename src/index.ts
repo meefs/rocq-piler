@@ -3186,8 +3186,9 @@ async function main() {
                     opts: { memo: false },
                   })
                 );
-                // Run as solve[] — fails if any subgoal remains
-                const tacBody = tactic.replace(/\.+$/, '');
+                // Run as solve[] — fails if any subgoal remains.
+                // Replace . separators with ; to avoid breaking solve[] parser.
+                const tacBody = tactic.replace(/\.+$/, '').replace(/\.\s+/g, '; ');
                 await lspClient.sendRequest<RunResult<number>>('petanque/run', {
                   st: stateR.st, tac: `solve [ ${tacBody} ].`, opts: { memo: false },
                 });
